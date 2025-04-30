@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "advection"
+version = "0.1.0"
+description = "Functions used to calculate advective fluxes in eddy covariance data and make corrections"
+readme = "README.rst"
+authors = [
+  {name = "Paul Inkenbrandt", email = "paulinkenbrandt@utah.gov"}
+]
+maintainers = [
+  {name = "Paul Inkenbrandt", email = "paulinkenbrandt@utah.gov"}
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering"
+
+]
+license = {text = "MIT license"}
+dependencies = ["numpy"
+
+]
+
+[project.optional-dependencies]
+dev = ["pandas",
+    "coverage",  # testing
+    "black",  # linting
+    "pytest",  # testing
+    "ruff"  # linting
+]
+
+[project.urls]
+
+bugs = "https://github.com/inkenbrandt/advection/issues"
+changelog = "https://github.com/inkenbrandt/advection/blob/master/changelog.md"
+homepage = "https://github.com/inkenbrandt/advection"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+"*" = ["*.*"]
+
+
+
+
+
