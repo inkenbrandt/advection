@@ -1,0 +1,52 @@
+# .readthedocs.yml
+# Build configuration for https://readthedocs.org
+
+version: 2
+
+# ------------------------------------------------------------
+# 1. Base image & toolchain
+# ------------------------------------------------------------
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "3.11"        # match your CI / library minimum
+
+# ------------------------------------------------------------
+# 2. Dependencies
+# ------------------------------------------------------------
+python:
+  install:
+    # Install the library itself in editable mode (`pip install -e .`)
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs            # optional: define [project.optional-dependencies.docs]
+    # Additional doc-only requirements
+    - requirements: docs/requirements.txt  # create if you need extra Sphinx plugins
+
+# ------------------------------------------------------------
+# 3. Sphinx build settings
+# ------------------------------------------------------------
+sphinx:
+  configuration: docs/conf.py   # relative to repo root
+  # Fail the build on warnings?  Flip to `true` when stable.
+  fail_on_warning: false
+  # Optional: speed up with parallel workers
+  # builder: html
+  # nitpick: true
+
+# ------------------------------------------------------------
+# 4. Output formats
+# ------------------------------------------------------------
+formats:
+  - htmlzip     # downloadable zip of HTML site
+  - pdf         # single PDF via LaTeX (requires a TeX distro)
+
+# ------------------------------------------------------------
+# 5. Optional advanced hooks
+# ------------------------------------------------------------
+# You can uncomment to run custom commands before Sphinx
+#
+#  commands:
+#    pre_build:
+#      - echo "Running extra pre-build steps"
