@@ -35,7 +35,11 @@ dev = ["pandas",
     "coverage",  # testing
     "black",  # linting
     "pytest",  # testing
-    "ruff"  # linting
+    "ruff",  # linting
+    "sphinx",  # documentation
+    "sphinx-autodoc-typehints",  # documentation
+    "sphinx-rtd-theme",  # documentation
+    "myst-parser",  # documentation
 ]
 
 [project.urls]
@@ -43,6 +47,7 @@ dev = ["pandas",
 bugs = "https://github.com/inkenbrandt/advection/issues"
 changelog = "https://github.com/inkenbrandt/advection/blob/master/changelog.md"
 homepage = "https://github.com/inkenbrandt/advection"
+documentation = "https://advection.readthedocs.io"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
