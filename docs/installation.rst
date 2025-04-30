@@ -4,6 +4,7 @@
 Installation
 ============
 
+The package is pure-Python with only **NumPy** as a hard dependency.
 
 Stable release
 --------------
