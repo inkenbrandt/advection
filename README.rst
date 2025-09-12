@@ -34,6 +34,7 @@ Features
 
 Credits
 -------
+Based on work by Wang and others, 2024 (10.1016/j.agrformet.2024.110196)
 
 This package was created with Cookiecutter_ and the `audreyr/cookiecutter-pypackage`_ project template.
 
