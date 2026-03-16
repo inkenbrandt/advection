@@ -1,3 +1,5 @@
+"""Functions for detecting horizontal and vertical advection."""
+
 import numpy as np
 
 # Physical constants for air (could be parameterized if needed)
@@ -23,24 +25,38 @@ def detect_horizontal_advection(
     """
     Detect periods of significant horizontal advection influencing the main tower.
 
-    Parameters:
-        main_flux (array-like): Time series of sensible heat flux (H) at the main tower (W/m^2).
-        upwind_flux (array-like, optional): Time series of H at an upwind reference tower.
-            Required for direct flux divergence detection. Default None.
-        wind_dir (array-like, optional): Time series of wind direction at the main tower (degrees from north).
-        upwind_dir (float, optional): The bearing (direction from main tower) toward the upwind reference tower (degrees from north).
-            If provided, horizontal advection is only considered when wind_dir is within ±45° of upwind_dir (i.e., the reference tower is upwind).
-        le_main (array-like, optional): Time series of latent heat flux (LE) at main tower (W/m^2). Used to check LE/(Rn-G) ratio.
-        rn (array-like, optional): Time series of net radiation (R_n) at main site (W/m^2).
-        g  (array-like, optional): Time series of soil heat flux (G) at main site (W/m^2).
-        temp_main (array-like, optional): Air temperature at the main tower (°C or K).
-        temp_upwind (array-like, optional): Air temperature at upwind tower (same units as temp_main).
-        humidity_main (array-like, optional): Air humidity (e.g. specific humidity or RH) at main tower.
-        humidity_upwind (array-like, optional): Air humidity at upwind tower.
-        wind_speed (array-like, optional): Wind speed at the main tower (m/s).
+    Parameters
+    ----------
+    main_flux : array-like
+        Time series of sensible heat flux (H) at the main tower (W/m^2).
+    upwind_flux : array-like, optional
+        Time series of H at an upwind reference tower. Required for direct flux divergence detection.
+    wind_dir : array-like, optional
+        Time series of wind direction at the main tower (degrees from north).
+    upwind_dir : float, optional
+        The bearing (direction from main tower) toward the upwind reference tower (degrees from north).
+        If provided, horizontal advection is only considered when wind_dir is within ±45° of upwind_dir.
+    le_main : array-like, optional
+        Time series of latent heat flux (LE) at main tower (W/m^2). Used to check LE/(Rn-G) ratio.
+    rn : array-like, optional
+        Time series of net radiation (R_n) at main site (W/m^2).
+    g : array-like, optional
+        Time series of soil heat flux (G) at main site (W/m^2).
+    temp_main : array-like, optional
+        Air temperature at the main tower (°C or K).
+    temp_upwind : array-like, optional
+        Air temperature at upwind tower (same units as temp_main).
+    humidity_main : array-like, optional
+        Air humidity (e.g. specific humidity or RH) at main tower.
+    humidity_upwind : array-like, optional
+        Air humidity at upwind tower.
+    wind_speed : array-like, optional
+        Wind speed at the main tower (m/s).
 
-    Returns:
-        np.ndarray (bool): Boolean mask array where True indicates detected horizontal advection events.
+    Returns
+    -------
+    np.ndarray
+        Boolean mask array where True indicates detected horizontal advection events.
     """
     main_flux = np.array(main_flux)
     n = len(main_flux)
@@ -120,16 +136,25 @@ def detect_vertical_advection(
     """
     Detect periods of vertical advection (vertical flux divergence) affecting the energy balance.
 
-    Parameters:
-        temp_profile_lower (array-like, optional): Temperature near the surface or canopy (°C or K).
-        temp_profile_upper (array-like, optional): Temperature at the measurement height or above (°C or K).
-        vertical_w (array-like, optional): Mean vertical wind speed (m/s) at the site (if available; usually small).
-        main_H (array-like, optional): Time series of sensible heat flux at the main tower (W/m^2).
-        rn (array-like, optional): Net radiation (W/m^2) for context (to distinguish daytime).
-        g (array-like, optional): Soil heat flux (W/m^2) for context.
+    Parameters
+    ----------
+    temp_profile_lower : array-like, optional
+        Temperature near the surface or canopy (°C or K).
+    temp_profile_upper : array-like, optional
+        Temperature at the measurement height or above (°C or K).
+    vertical_w : array-like, optional
+        Mean vertical wind speed (m/s) at the site (if available; usually small).
+    main_H : array-like, optional
+        Time series of sensible heat flux at the main tower (W/m^2).
+    rn : array-like, optional
+        Net radiation (W/m^2) for context (to distinguish daytime).
+    g : array-like, optional
+        Soil heat flux (W/m^2) for context.
 
-    Returns:
-        np.ndarray (bool): Boolean mask of detected vertical advection periods.
+    Returns
+    -------
+    np.ndarray
+        Boolean mask of detected vertical advection periods.
     """
     n = 0
     if temp_profile_lower is not None:
@@ -185,29 +210,30 @@ def compute_advection_fluxes(
     """
     Compute horizontal and vertical advection flux time series for energy balance closure.
 
-    Parameters:
-        main_data (dict): Dictionary of main tower data series. Must contain:
-            'H' (sensible heat flux, W/m^2),
-            'LE' (latent heat flux, W/m^2),
-            'Rn' (net radiation, W/m^2),
-            'G' (ground heat flux, W/m^2).
-          May also contain:
-            'T' (air temperature, °C or K),
-            'q' (specific humidity, kg/kg or similar),
-            'wind_dir' (wind direction, deg),
-            'wind_speed' (wind speed, m/s), etc.
-        upwind_data (dict or list of dicts, optional): Data for upwind tower(s), with similar keys as main_data.
-            If multiple towers are provided, the one aligned with current wind direction will be used each timestep.
-        detect_horizontal (np.ndarray, optional): Boolean array from detect_horizontal_advection (to limit times of computation).
-        detect_vertical (np.ndarray, optional): Boolean array from detect_vertical_advection.
-        tower_distance (float, optional): Distance (m) between the main tower and the upwind tower used for advection.
-            If provided, can be used to normalize horizontal flux gradient (not essential for direct flux difference method).
+    Parameters
+    ----------
+    main_data : dict
+        Dictionary of main tower data series. Must contain:
+        'H' (sensible heat flux, W/m^2),
+        'LE' (latent heat flux, W/m^2),
+        'Rn' (net radiation, W/m^2),
+        'G' (ground heat flux, W/m^2).
+    upwind_data : dict or list of dicts, optional
+        Data for upwind tower(s), with similar keys as main_data.
+    detect_horizontal : np.ndarray, optional
+        Boolean array from detect_horizontal_advection (to limit times of computation).
+    detect_vertical : np.ndarray, optional
+        Boolean array from detect_vertical_advection.
+    tower_distance : float, optional
+        Distance (m) between the main tower and the upwind tower used for advection.
 
-    Returns:
-        dict: A dictionary with keys:
-            'H_adv' (horizontal advective heat flux, W/m^2, positive = energy entering control volume),
-            'V_adv' (vertical advective heat flux, W/m^2, positive = energy entering from above (downward)),
-            'adv_in' (net advective energy term used to close balance, W/m^2).
+    Returns
+    -------
+    dict
+        A dictionary with keys:
+        'H_adv' (horizontal advective heat flux, W/m^2, positive = energy entering control volume),
+        'V_adv' (vertical advective heat flux, W/m^2, positive = energy entering from above (downward)),
+        'adv_in' (net advective energy term used to close balance, W/m^2).
     """
     # Extract main data
     H_main = np.array(main_data["H"])
@@ -304,14 +330,20 @@ def apply_advection_correction(main_data, H_adv, V_adv):
 
     This function adds the advection terms to the energy balance and returns an updated dataset.
 
-    Parameters:
-        main_data (dict): Dictionary of main tower data (must contain 'H', 'LE', 'Rn', 'G').
-        H_adv (array-like): Horizontal advection flux time series (W/m^2).
-        V_adv (array-like): Vertical advection flux time series (W/m^2).
+    Parameters
+    ----------
+    main_data : dict
+        Dictionary of main tower data (must contain 'H', 'LE', 'Rn', 'G').
+    H_adv : array-like
+        Horizontal advection flux time series (W/m^2).
+    V_adv : array-like
+        Vertical advection flux time series (W/m^2).
 
-    Returns:
-        dict: Corrected energy balance components, including:
-            'Rn', 'G', 'H', 'LE', 'H_adv', 'V_adv', 'H_plus_LE_orig', 'H_plus_LE_corrected'.
+    Returns
+    -------
+    dict
+        Corrected energy balance components, including:
+        'Rn', 'G', 'H', 'LE', 'H_adv', 'V_adv', 'H_plus_LE_orig', 'H_plus_LE_corrected'.
     """
     H_main = np.array(main_data["H"])
     LE_main = np.array(main_data["LE"])

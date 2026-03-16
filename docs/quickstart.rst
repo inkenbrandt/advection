@@ -85,27 +85,11 @@ Step 4 – Compute & apply flux corrections
 Energy-balance closure & advection
 ==================================
 
-Why closure matters
--------------------
-
-Eddy-covariance towers routinely **under-sum the available
-energy**—the measured sensible (H) plus latent (LE) heat flux is
-typically 10–20 % lower than :math:`R_n - G`.  Recent field campaigns
-(BEAREX, EBEX-2000, ADVEX, Wang *et al.* 2024) demonstrate that
-
-* **Horizontal advection** of warm/dry air over irrigated fields can
-  enhance ET so that *λE* exceeds the available energy.
-* **Vertical advection / storage** during stable nights can transport
-  heat downward, driving negative H.
-
-Accurately *flagging* and *quantifying* these terms greatly improves
-closure—from ~0.88 to ≥ 0.97 in Wang 2024, for example.
-
 Detection strategy implemented
 ------------------------------
 
-The :pymod:`advection.advect_detect`
-module applies four empirically proven criteria :contentReference[oaicite:0]{index=0}&#8203;:contentReference[oaicite:1]{index=1}:
+The :py:mod:`advection.advect_detect`
+module applies four empirically proven criteria:
 
 1. **Up-/down-wind flux divergence** (requires a reference tower).
 2. **LE > AE** by >5 %.
@@ -117,29 +101,13 @@ Vertical advection uses canopy inversions plus mean subsidence tests.
 Flux computation
 ----------------
 
-:pyfunc:`advection.advection.compute_advection_fluxes`
+:py:func:`advection.advection.compute_advection_fluxes`
 allocates the residual energy to
 
 * *H\_adv* – horizontal component,
 * *V\_adv* – vertical component,
 
-by matching wind direction to the relevant upwind tower if supplied :contentReference[oaicite:2]{index=2}&#8203;:contentReference[oaicite:3]{index=3}.
+by matching wind direction to the relevant upwind tower if supplied.
 
 For rigorous background, consult Prueger 2012, Dhungel 2022,
 Moderow 2021, and Wang 2024 (see *References* section of the API docs).
-
-advection.advect_detect
-==================================
-
-.. automodule:: advection.advect_detect
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-advection.advection
-==============================
-
-.. automodule:: advection.advection
-   :members:
-   :undoc-members:
-   :show-inheritance:
