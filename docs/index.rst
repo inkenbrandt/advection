@@ -29,8 +29,8 @@ similar open-path systems.
    :maxdepth: 1
    :caption: API Reference
 
-   reference/advect_detect
    reference/advection
+   reference/advect_detect
 
 Indices and tables
 ==================

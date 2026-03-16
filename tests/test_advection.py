@@ -145,7 +145,7 @@ def test_detect_horizontal_advection_le_exceeds_rn_minus_g():
     rn = [100.0]
     g = [0.0]
     flags = ax.detect_horizontal_advection(main_flux, le_main=le, rn=rn, g=g)
-    assert flags[0] is True
+    assert bool(flags[0]) is True
 
 
 def test_detect_vertical_advection():
@@ -168,11 +168,13 @@ def test_detect_vertical_advection():
 
 def test_compute_advection_fluxes_balances():
     main = {
-        "H": np.array([10.0, 20.0]),
+        "H": np.array([54.0, 64.0]),
         "LE": np.array([30.0, 40.0]),
-        "Rn": np.array([60.0, 70.0]),
+        "Rn": np.array([90.0, 110.0]),
         "G": np.array([5.0, 5.0]),
     }
+    # Residuals: (54+30) - (90-5) = 84 - 85 = -1. abs(-1) < 0.1 * 85 (8.5)
+    #            (64+40) - (110-5) = 104 - 105 = -1. abs(-1) < 0.1 * 105 (10.5)
     res = ax.compute_advection_fluxes(main_data=main)
     adv_in_expected = (main["H"] + main["LE"]) - (main["Rn"] - main["G"])
     np.testing.assert_allclose(res["adv_in"], adv_in_expected)
