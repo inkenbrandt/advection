@@ -56,9 +56,9 @@ closure gaps** in eddy-covariance (EC) measurement of evapotranspiration.
 * New **soft-rotation and planar-fit algorithms** improved H and λE estimates
   but left the advective component unmeasured.
 
------------------------------------------------------------------
+-------------------------------------------------------------------
 5. 2016 – Present  |  Integrated sensing, LES, and machine learning
------------------------------------------------------------------
+-------------------------------------------------------------------
 
 * **Wang et al. 2024** combined *multi-tower EC*, Doppler lidar, and UAV
   imagery over irrigated alfalfa.  Explicitly adding horizontal & vertical
@@ -74,13 +74,13 @@ closure gaps** in eddy-covariance (EC) measurement of evapotranspiration.
 6. How this history shaped the package
 -----------------------------------------------------------------
 
-The modules in :pymod:`advective_flux_tools` encode three decades of insight:
+The modules in :py:mod:`advection` encode three decades of insight:
 
-* :pymod:`advective_flux_tools.advect_detect`
+* :py:mod:`advection.advect_detect`
   implements empirical rules distilled from EBEX, BEAREX, and Wang 2024 to
   flag periods prone to **horizontal / vertical advection** using only tower
   data plus optional upwind references.
-* :pymod:`advective_flux_tools.advection`
+* :py:mod:`advection.advection`
   translates those flags into **flux corrections** that reconcile *λE + H* with
   *Rₙ − G*, following the energy-balance bookkeeping formalized by Foken & Oncley
   and expanded by recent campaign protocols.

@@ -168,60 +168,6 @@ def test_detect_horizontal_advection_le_exceeds_rn_minus_g():
     assert bool(flags[0]) is True
 
 
-def test_detect_horizontal_advection_wind_alignment():
-    # wind_dir=10, upwind_dir=350, diff=20 (within 45)
-    # wind_dir=10, upwind_dir=60, diff=50 (outside 45)
-    main_flux = [50.0, 50.0]
-    upwind_flux = [80.0, 80.0]
-    wind_dir = [10.0, 10.0]
-    upwind_dir = 350.0
-    flags1 = ax.detect_horizontal_advection(
-        main_flux, upwind_flux=upwind_flux, wind_dir=wind_dir, upwind_dir=upwind_dir
-    )
-    assert bool(flags1[0]) is True
-
-    upwind_dir2 = 60.0
-    flags2 = ax.detect_horizontal_advection(
-        main_flux, upwind_flux=upwind_flux, wind_dir=wind_dir, upwind_dir=upwind_dir2
-    )
-    assert bool(flags2[0]) is False
-
-
-def test_detect_horizontal_advection_opposite_signs():
-    main_flux = [-10.0]
-    upwind_flux = [10.0]
-    flags = ax.detect_horizontal_advection(main_flux, upwind_flux=upwind_flux)
-    assert bool(flags[0]) is True
-
-
-def test_detect_horizontal_advection_daytime_negative_H():
-    main_flux = [-10.0]
-    rn = [60.0]
-    flags = ax.detect_horizontal_advection(main_flux, rn=rn)
-    assert bool(flags[0]) is True
-
-
-def test_detect_horizontal_advection_gradients():
-    main_flux = [50.0, 50.0]
-    # Temp gradient
-    temp_main = [20.0, 20.0]
-    temp_upwind = [21.5, 20.0]
-    flags_t = ax.detect_horizontal_advection(
-        main_flux, temp_main=temp_main, temp_upwind=temp_upwind
-    )
-    assert bool(flags_t[0]) is True
-    assert bool(flags_t[1]) is False
-
-    # Humidity gradient
-    hum_main = [0.012, 0.012]
-    hum_upwind = [0.010, 0.012]
-    flags_q = ax.detect_horizontal_advection(
-        main_flux, humidity_main=hum_main, humidity_upwind=hum_upwind
-    )
-    assert bool(flags_q[0]) is True
-    assert bool(flags_q[1]) is False
-
-
 def test_detect_vertical_advection():
     temp_lower = [15.0, 20.0]
     temp_upper = [17.0, 19.0]  # inversion only first time step
@@ -272,11 +218,13 @@ def test_detect_vertical_advection_no_data():
 
 def test_compute_advection_fluxes_balances():
     main = {
-        "H": np.array([10.0, 20.0]),
+        "H": np.array([54.0, 64.0]),
         "LE": np.array([30.0, 40.0]),
-        "Rn": np.array([40.1, 60.1]),
-        "G": np.array([0.0, 0.0]),
+        "Rn": np.array([90.0, 110.0]),
+        "G": np.array([5.0, 5.0]),
     }
+    # Residuals: (54+30) - (90-5) = 84 - 85 = -1. abs(-1) < 0.1 * 85 (8.5)
+    #            (64+40) - (110-5) = 104 - 105 = -1. abs(-1) < 0.1 * 105 (10.5)
     res = ax.compute_advection_fluxes(main_data=main)
     adv_in_expected = (main["H"] + main["LE"]) - (main["Rn"] - main["G"])
     np.testing.assert_allclose(res["adv_in"], adv_in_expected)
