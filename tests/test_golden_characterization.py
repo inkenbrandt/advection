@@ -195,15 +195,18 @@ def test_golden_rh_to_specific_humidity_fraction_equiv():
 
 
 def test_golden_detect_horizontal_flux_difference():
-    # t0: upwind 80 > main 50 + 20  -> flagged; t1: 40 > 50 + 20 is False.
+    # t0: upwind 80 > main 50 + upwind_h_excess(20) -> flagged; t1: 40 > 70 is
+    # False. The threshold is now the named, documented `upwind_h_excess`
+    # keyword (absolute W/m^2), defaulting to the historical 20 W/m^2.
     flags = ax.detect_horizontal_advection([50.0, 50.0], upwind_flux=[80.0, 40.0])
     assert flags.tolist() == [True, False]
-    # PHYSICS: reasonable heuristic. The 20 W/m^2 absolute threshold is a tuned
-    # magic number, not a physically derived gradient term.
+    # PHYSICS: coarse heuristic. The W/m^2 threshold is a tuned magic number, not
+    # a physically derived gradient term; the gradient signals are preferred.
 
 
 def test_golden_detect_horizontal_opposite_sign():
-    # main < 0 < upwind triggers the opposite-sign rule.
+    # main -5 < 0 and upwind 30 > -5 + upwind_h_excess(20) = 15 -> the
+    # upwind-sensible-heat-excess signal fires.
     flags = ax.detect_horizontal_advection([-5.0], upwind_flux=[30.0])
     assert flags.tolist() == [True]
     # PHYSICS: consistent with the oasis fingerprint (downward/negative H at the
@@ -226,8 +229,9 @@ def test_golden_detect_horizontal_negative_H_daytime():
 
 
 def test_golden_detect_horizontal_wind_direction_gate():
-    # wind_dir 10 deg vs upwind_dir 180 deg -> angular diff 170 deg > 45 deg,
-    # so the upwind-flux criterion is skipped and nothing else applies.
+    # wind_dir 10 deg vs upwind_dir 180 deg -> angular diff 170 deg > 45 deg
+    # (the default ±wind_sector_deg), so the upwind-referenced signal is gated
+    # off and nothing else applies.
     flags = ax.detect_horizontal_advection(
         [50.0], upwind_flux=[80.0], wind_dir=[10.0], upwind_dir=180.0
     )

@@ -17,121 +17,222 @@ from .advection import (  # noqa: F401
 )
 
 
+def _as_float_series(value, n):
+    """Return ``value`` as a length-``n`` float array, or ``None`` if absent.
+
+    Scalars are broadcast to length ``n``; Python ``None`` entries inside a
+    list become ``np.nan`` (because ``np.asarray(..., dtype=float)`` maps
+    ``None`` to ``nan``). Missing data is therefore represented uniformly as
+    ``nan`` so it can be masked with :func:`numpy.isnan` -- never with an
+    ``is None`` test, which silently never fires on a float ``ndarray``.
+    """
+    if value is None:
+        return None
+    arr = np.asarray(value, dtype=float)
+    if arr.ndim == 0:
+        return np.full(n, float(arr))
+    return arr
+
+
 def detect_horizontal_advection(
     main_flux,
-    upwind_flux=None,
-    wind_dir=None,
-    upwind_dir=None,
-    le_main=None,
+    *,
     rn=None,
     g=None,
+    le_main=None,
     temp_main=None,
     temp_upwind=None,
     humidity_main=None,
     humidity_upwind=None,
-    wind_speed=None,
+    wind_dir=None,
+    upwind_dir=None,
+    upwind_flux=None,
+    rn_high=50.0,
+    h_neg_threshold=0.0,
+    ef_tol=1.05,
+    temp_diff_threshold=1.0,
+    humidity_diff_threshold=0.001,
+    wind_sector_deg=45.0,
+    upwind_h_excess=20.0,
+    return_components=False,
 ):
-    """
-    Detect periods of significant horizontal advection influencing the main tower.
+    """Detect periods of horizontal advection influencing the main tower.
+
+    Fully **vectorized** (no Python per-timestep loop) and built from the
+    documented oasis-regime detection signals. Each signal is an independent,
+    parameterized boolean flag; the returned mask is their logical **OR**.
+    Missing data is carried as ``np.nan`` and excluded from every comparison via
+    :func:`numpy.isnan` (an ``x is None`` test, used by the previous version,
+    never fires on a float ``ndarray`` and so silently failed to mask gaps).
+
+    Detection signals
+    -----------------
+    1. **Negative midday sensible heat / negative Bowen ratio** (oasis
+       fingerprint; Wang 2024 §2.2). Fires where ``H < h_neg_threshold`` while
+       ``Rn > rn_high`` -- warm dry air advected onto a cool transpiring surface
+       drives a downward (negative) ``H`` in full daytime. Needs ``main_flux``
+       and ``rn``.
+    2. **Evaporative fraction ``EF = LE / (Rn - G) > 1``** (advective input;
+       synthesis §2.3). Fires where ``LE > (Rn - G) * ef_tol`` and the available
+       energy ``Rn - G`` is positive (``EF`` is only meaningful by day). Needs
+       ``le_main``, ``rn`` and ``g``.
+    3. **Horizontal temperature / humidity gradient** between the main and an
+       upwind tower (warm and/or dry air upwind). The warm-upwind flag fires
+       where ``temp_upwind > temp_main + temp_diff_threshold``; the dry-upwind
+       flag where ``humidity_main - humidity_upwind > humidity_diff_threshold``
+       (main moister than upwind). Both are evaluated **only when the wind is
+       blowing from the upwind tower** -- i.e. ``wind_dir`` is within
+       ``±wind_sector_deg`` of the bearing ``upwind_dir`` (a ±45° sector by
+       default; ±20° is a common stricter choice). If either ``wind_dir`` or
+       ``upwind_dir`` is omitted the sector gate is not applied.
+
+    In addition, when an upwind sensible-heat series ``upwind_flux`` is supplied,
+    an **upwind sensible-heat excess** flag fires where
+    ``upwind_flux > main_flux + upwind_h_excess`` (also subject to the wind-sector
+    gate). ``upwind_h_excess`` is an **absolute W/m^2** difference -- this is the
+    single, named, documented threshold that replaces the previous version's
+    contradiction between a docstring that said "20% higher" and code that added
+    an absolute ``20 W/m^2``. The absolute reading is the one kept.
 
     Parameters
     ----------
     main_flux : array-like
-        Time series of sensible heat flux (H) at the main tower (W/m^2).
-    upwind_flux : array-like, optional
-        Time series of H at an upwind reference tower. Required for direct flux divergence detection.
-    wind_dir : array-like, optional
-        Time series of wind direction at the main tower (degrees from north).
-    upwind_dir : float, optional
-        The bearing (direction from main tower) toward the upwind reference tower (degrees from north).
-        If provided, horizontal advection is only considered when wind_dir is within ±45° of upwind_dir.
-    le_main : array-like, optional
-        Time series of latent heat flux (LE) at main tower (W/m^2). Used to check LE/(Rn-G) ratio.
+        Sensible heat flux ``H`` at the main tower [W/m^2].
     rn : array-like, optional
-        Time series of net radiation (R_n) at main site (W/m^2).
+        Net radiation ``Rn`` at the main site [W/m^2].
     g : array-like, optional
-        Time series of soil heat flux (G) at main site (W/m^2).
-    temp_main : array-like, optional
-        Air temperature at the main tower (°C or K).
-    temp_upwind : array-like, optional
-        Air temperature at upwind tower (same units as temp_main).
-    humidity_main : array-like, optional
-        Air humidity (e.g. specific humidity or RH) at main tower.
-    humidity_upwind : array-like, optional
-        Air humidity at upwind tower.
-    wind_speed : array-like, optional
-        Wind speed at the main tower (m/s).
+        Soil/ground heat flux ``G`` at the main site [W/m^2].
+    le_main : array-like, optional
+        Latent heat flux ``LE`` at the main tower [W/m^2].
+    temp_main, temp_upwind : array-like, optional
+        Air temperature at the main and upwind towers [°C or K] (same units).
+    humidity_main, humidity_upwind : array-like, optional
+        Specific humidity at the main and upwind towers [kg/kg].
+    wind_dir : array-like, optional
+        Wind direction at the main tower [deg from north].
+    upwind_dir : float, optional
+        Bearing from the main tower toward the upwind tower [deg from north].
+        Together with ``wind_dir`` this gates the gradient and upwind-flux
+        signals to a ``±wind_sector_deg`` sector about the fetch direction.
+    upwind_flux : array-like, optional
+        Sensible heat flux ``H`` at an upwind reference tower [W/m^2].
+    rn_high : float, default 50.0
+        Net-radiation threshold [W/m^2] above which a period is treated as
+        midday for the negative-``H`` signal.
+    h_neg_threshold : float, default 0.0
+        Sensible-heat threshold [W/m^2]; ``H`` below this (while ``Rn > rn_high``)
+        flags the oasis negative-``H`` signal.
+    ef_tol : float, default 1.05
+        Evaporative-fraction tolerance. ``LE > (Rn - G) * ef_tol`` flags
+        advective input; the 5 % margin guards against measurement noise.
+    temp_diff_threshold : float, default 1.0
+        Minimum upwind-minus-main air-temperature excess [°C or K] for the
+        warm-upwind gradient flag.
+    humidity_diff_threshold : float, default 0.001
+        Minimum main-minus-upwind specific-humidity excess [kg/kg] for the
+        dry-upwind gradient flag.
+    wind_sector_deg : float, default 45.0
+        Half-width [deg] of the wind-direction sector about ``upwind_dir`` within
+        which the gradient and upwind-flux signals are evaluated.
+    upwind_h_excess : float, default 20.0
+        Absolute amount [W/m^2] by which ``upwind_flux`` must exceed ``main_flux``
+        to flag an upwind sensible-heat excess. Absolute W/m^2, not a percentage.
+    return_components : bool, default False
+        If True, also return a dict mapping each criterion name to its boolean
+        mask (plus ``'wind_aligned'``), suitable for ``pandas.DataFrame(...)``.
 
     Returns
     -------
-    np.ndarray
-        Boolean mask array where True indicates detected horizontal advection events.
+    numpy.ndarray
+        Boolean mask (length ``n``); True where any signal detects advection.
+    dict, optional
+        Returned only when ``return_components`` is True, as
+        ``(mask, components)``. Keys: ``'negative_H'``, ``'ef_gt_1'``,
+        ``'warm_upwind'``, ``'dry_upwind'``, ``'upwind_H_excess'`` and
+        ``'wind_aligned'`` (the sector gate), each a length-``n`` boolean array.
+
+    References
+    ----------
+    Wang et al. (2024) §2.2 (negative Bowen / oasis fingerprint) and the EF > 1
+    advective-input synthesis §2.3. Moderow et al. (2021) OUT-positive sign
+    convention.
     """
-    main_flux = np.array(main_flux)
-    n = len(main_flux)
-    adv_flag = np.zeros(n, dtype=bool)
-    # Compute available energy if possible
-    avail_energy = None
-    if rn is not None and g is not None:
-        rn = np.array(rn)
-        g = np.array(g)
+    main_flux = np.atleast_1d(np.asarray(main_flux, dtype=float))
+    n = main_flux.shape[0]
+    main_valid = ~np.isnan(main_flux)
+
+    rn = _as_float_series(rn, n)
+    g = _as_float_series(g, n)
+    le_main = _as_float_series(le_main, n)
+    temp_main = _as_float_series(temp_main, n)
+    temp_upwind = _as_float_series(temp_upwind, n)
+    humidity_main = _as_float_series(humidity_main, n)
+    humidity_upwind = _as_float_series(humidity_upwind, n)
+    wind_dir = _as_float_series(wind_dir, n)
+    upwind_flux = _as_float_series(upwind_flux, n)
+
+    # --- wind-sector gate for the upwind-referenced signals ------------------
+    # Aligned == wind blowing from the bearing to the upwind tower (within
+    # ±wind_sector_deg). With no directional information the gate is open (all
+    # True); a NaN wind_dir is treated as "not aligned" -- fetch cannot be
+    # confirmed, so the upwind-referenced signals are withheld for that step.
+    if wind_dir is not None and upwind_dir is not None:
+        ang_diff = np.abs(((wind_dir - upwind_dir + 180.0) % 360.0) - 180.0)
+        wind_aligned = ~np.isnan(wind_dir) & (ang_diff <= wind_sector_deg)
+    else:
+        wind_aligned = np.ones(n, dtype=bool)
+
+    # --- Signal 1: negative midday H (oasis fingerprint, Wang 2024 §2.2) ------
+    negative_H = np.zeros(n, dtype=bool)
+    if rn is not None:
+        valid = main_valid & ~np.isnan(rn)
+        negative_H = valid & (main_flux < h_neg_threshold) & (rn > rn_high)
+
+    # --- Signal 2: EF = LE/(Rn-G) > 1 (advective input, synthesis §2.3) -------
+    ef_gt_1 = np.zeros(n, dtype=bool)
+    if le_main is not None and rn is not None and g is not None:
         avail_energy = rn - g  # Rn - G
-    # Loop through each time step (vectorized operations could be used as well)
-    for i in range(n):
-        # Check wind direction alignment for upwind tower if specified
-        if upwind_dir is not None and wind_dir is not None:
-            if wind_dir[i] is None:
-                continue  # skip if no wind data
-            # Calculate angular difference (taking care of circular wrap-around)
-            ang_diff = None
-            try:
-                ang_diff = abs(((wind_dir[i] - upwind_dir + 180) % 360) - 180)
-            except:
-                ang_diff = abs(wind_dir[i] - upwind_dir)
-            if ang_diff > 45:
-                # Wind not coming from the direction of the reference tower, so skip marking adv from that tower
-                continue
-        # Criteria 1: If upwind flux is provided and significantly greater than main flux
-        if upwind_flux is not None:
-            upwind_val = upwind_flux[i]
-            main_val = main_flux[i]
-            if upwind_val is not None and main_val is not None:
-                # Mark if upwind H >> main H (e.g. 20% higher or more) indicating extra heat available upwind
-                if (
-                    upwind_val > main_val + 20
-                ):  # threshold = 20 W/m^2 difference (can be tuned)
-                    adv_flag[i] = True
-                # Also mark if upwind and main H have opposite signs (e.g. upwind positive, main negative)
-                if main_val < 0 < upwind_val:
-                    adv_flag[i] = True
-        # Criteria 2: If available energy and LE are given, and LE exceeds available energy (LE/(Rn-G) > 1)
-        if avail_energy is not None and le_main is not None:
-            # Use a tolerance to account for measurement uncertainty
-            if avail_energy[i] is not None and le_main[i] is not None:
-                if (
-                    le_main[i] > avail_energy[i] * 1.05
-                ):  # LE is 5% greater than Rn-G (beyond typical error)
-                    adv_flag[i] = True
-        # Criteria 3: Main H is negative (downward) during daytime (suggesting advected warm air causing downward heat flux)
-        # We consider daytime if Rn > 50 W/m^2 or so.
-        if rn is not None:
-            if rn[i] is not None and rn[i] > 50:
-                if main_flux[i] is not None and main_flux[i] < 0:
-                    adv_flag[i] = True
-        # Criteria 4: Temperature/humidity differences indicating horizontal gradients
-        if temp_main is not None and temp_upwind is not None:
-            if temp_main[i] is not None and temp_upwind[i] is not None:
-                # If upwind is significantly warmer than main (e.g. >1°C), indicates potential warm advection
-                if temp_upwind[i] > temp_main[i] + 1.0:
-                    adv_flag[i] = True
-        if humidity_main is not None and humidity_upwind is not None:
-            if humidity_main[i] is not None and humidity_upwind[i] is not None:
-                # If upwind is much drier (e.g. lower specific humidity by >1 g/kg or 0.001 in kg/kg)
-                if (humidity_main[i] - humidity_upwind[i]) > 0.001:
-                    # Main is moister than upwind -> dry air advection likely
-                    adv_flag[i] = True
-        # (Optional spectral criterion could be implemented here: e.g., check if low-frequency variance is high during this period)
-    return adv_flag
+        valid = ~np.isnan(le_main) & ~np.isnan(avail_energy) & (avail_energy > 0.0)
+        ef_gt_1 = valid & (le_main > avail_energy * ef_tol)
+
+    # --- Signal 3: horizontal T / q gradients (warm/dry upwind), wind-gated ---
+    warm_upwind = np.zeros(n, dtype=bool)
+    if temp_main is not None and temp_upwind is not None:
+        valid = ~np.isnan(temp_main) & ~np.isnan(temp_upwind)
+        warm_upwind = (
+            wind_aligned & valid & (temp_upwind > temp_main + temp_diff_threshold)
+        )
+
+    dry_upwind = np.zeros(n, dtype=bool)
+    if humidity_main is not None and humidity_upwind is not None:
+        valid = ~np.isnan(humidity_main) & ~np.isnan(humidity_upwind)
+        dry_upwind = (
+            wind_aligned
+            & valid
+            & ((humidity_main - humidity_upwind) > humidity_diff_threshold)
+        )
+
+    # --- Optional: upwind sensible-heat excess (absolute W/m^2), wind-gated ---
+    upwind_H_excess = np.zeros(n, dtype=bool)
+    if upwind_flux is not None:
+        valid = main_valid & ~np.isnan(upwind_flux)
+        upwind_H_excess = (
+            wind_aligned & valid & (upwind_flux > main_flux + upwind_h_excess)
+        )
+
+    mask = negative_H | ef_gt_1 | warm_upwind | dry_upwind | upwind_H_excess
+
+    if return_components:
+        components = {
+            "negative_H": negative_H,
+            "ef_gt_1": ef_gt_1,
+            "warm_upwind": warm_upwind,
+            "dry_upwind": dry_upwind,
+            "upwind_H_excess": upwind_H_excess,
+            "wind_aligned": wind_aligned,
+        }
+        return mask, components
+    return mask
 
 
 def detect_vertical_advection(

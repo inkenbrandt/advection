@@ -295,6 +295,117 @@ def test_detect_horizontal_advection_le_exceeds_rn_minus_g():
     assert bool(flags[0]) is True
 
 
+def test_detect_horizontal_advection_negative_midday_H():
+    # H < 0 while Rn > rn_high (50) -> oasis negative-H fingerprint.
+    flags = ax.detect_horizontal_advection([-10.0, 5.0], rn=[300.0, 300.0])
+    assert flags.tolist() == [True, False]
+
+
+def test_detect_horizontal_advection_ef_requires_positive_available_energy():
+    # Nighttime: Rn - G < 0 so EF is meaningless and must NOT flag, even though
+    # LE numerically exceeds (Rn - G) * ef_tol (a negative number).
+    flags = ax.detect_horizontal_advection([-5.0], le_main=[10.0], rn=[-20.0], g=[10.0])
+    assert flags.tolist() == [False]
+
+
+def test_detect_horizontal_advection_nan_inputs_are_masked():
+    # np.nan must be excluded via np.isnan, never flagged. The old `is None`
+    # test silently let NaNs through; here every signal sees a NaN and the
+    # result must stay False without raising.
+    flags = ax.detect_horizontal_advection(
+        [np.nan, -10.0],
+        rn=[300.0, 300.0],
+        le_main=[np.nan, 50.0],
+        g=[0.0, 0.0],
+        temp_main=[20.0, 20.0],
+        temp_upwind=[np.nan, 18.0],
+        humidity_main=[np.nan, 0.01],
+        humidity_upwind=[0.005, 0.005],
+    )
+    # t0: H is NaN, all upwind/LE/temp/humidity comparisons hit a NaN -> False.
+    # t1: H=-10 < 0 and Rn=300 > 50 -> negative-H fires.
+    assert flags.tolist() == [False, True]
+
+
+def test_detect_horizontal_advection_thresholds_are_keyword_args():
+    # Raising rn_high above Rn suppresses the negative-H signal; lowering it
+    # restores it. Same for ef_tol and upwind_h_excess.
+    assert ax.detect_horizontal_advection([-10.0], rn=[60.0]).tolist() == [True]
+    assert ax.detect_horizontal_advection(
+        [-10.0], rn=[60.0], rn_high=75.0
+    ).tolist() == [False]
+    # EF tolerance: LE = 104 is below 1.05 * 100 by default, above 1.0 * 100 if
+    # the tolerance is relaxed.
+    base = dict(le_main=[104.0], rn=[100.0], g=[0.0])
+    assert ax.detect_horizontal_advection([50.0], **base).tolist() == [False]
+    assert ax.detect_horizontal_advection([50.0], ef_tol=1.0, **base).tolist() == [True]
+    # upwind_h_excess is an absolute W/m^2 difference, not a percentage.
+    assert ax.detect_horizontal_advection(
+        [50.0], upwind_flux=[65.0], upwind_h_excess=10.0
+    ).tolist() == [True]
+
+
+def test_detect_horizontal_advection_wind_sector_gates_gradients():
+    # Warm/dry upwind gradients fire only when wind blows from the upwind tower.
+    aligned = ax.detect_horizontal_advection(
+        [50.0],
+        temp_main=[20.0],
+        temp_upwind=[24.0],
+        wind_dir=[185.0],
+        upwind_dir=180.0,
+    )
+    assert aligned.tolist() == [True]
+    off_sector = ax.detect_horizontal_advection(
+        [50.0],
+        temp_main=[20.0],
+        temp_upwind=[24.0],
+        wind_dir=[10.0],
+        upwind_dir=180.0,
+    )
+    assert off_sector.tolist() == [False]
+    # A tighter sector can exclude a borderline alignment.
+    assert ax.detect_horizontal_advection(
+        [50.0],
+        temp_main=[20.0],
+        temp_upwind=[24.0],
+        wind_dir=[210.0],
+        upwind_dir=180.0,
+        wind_sector_deg=20.0,
+    ).tolist() == [False]
+
+
+def test_detect_horizontal_advection_return_components():
+    mask, comps = ax.detect_horizontal_advection(
+        [-10.0, 50.0],
+        rn=[300.0, 300.0],
+        le_main=[10.0, 350.0],  # t1: EF = 350/300 > 1.05 -> advective input
+        g=[0.0, 0.0],
+        return_components=True,
+    )
+    assert mask.tolist() == [True, True]
+    assert comps["negative_H"].tolist() == [True, False]
+    assert comps["ef_gt_1"].tolist() == [False, True]
+    # No upwind tower / wind info supplied -> those signals all False, gate open.
+    assert comps["warm_upwind"].tolist() == [False, False]
+    assert comps["wind_aligned"].tolist() == [True, True]
+    # Every component is a length-n boolean array (DataFrame-ready).
+    for arr in comps.values():
+        assert arr.dtype == bool
+        assert arr.shape == (2,)
+
+
+def test_detect_horizontal_advection_is_vectorized():
+    # A longer series returns a single boolean array, not a Python loop result.
+    n = 1000
+    rng = np.random.default_rng(0)
+    H = rng.normal(0.0, 50.0, n)
+    Rn = np.full(n, 300.0)
+    flags = ax.detect_horizontal_advection(H, rn=Rn)
+    assert isinstance(flags, np.ndarray)
+    assert flags.shape == (n,)
+    assert np.array_equal(flags, (H < 0.0) & (Rn > 50.0))
+
+
 def test_detect_vertical_advection():
     temp_lower = [15.0, 20.0]
     temp_upper = [17.0, 19.0]  # inversion only first time step
