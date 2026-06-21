@@ -406,43 +406,84 @@ def test_detect_horizontal_advection_is_vectorized():
     assert np.array_equal(flags, (H < 0.0) & (Rn > 50.0))
 
 
-def test_detect_vertical_advection():
-    temp_lower = [15.0, 20.0]
-    temp_upper = [17.0, 19.0]  # inversion only first time step
-    vertical_w = [-0.1, 0.0]
-    main_H = [5.0, 100.0]
+def test_detect_vertical_advection_w_bar_threshold():
+    # Primary signal: |w_bar| above vs below the 0.05 m/s threshold (Lee 1998).
+    # t0: |w_bar| = 0.08 > 0.05 -> flagged purely on the mean vertical velocity,
+    #     even with no temperature inversion and a healthy positive daytime H.
+    # t1: |w_bar| = 0.02 < 0.05, no inversion, normal H -> not flagged.
+    vertical_w = [-0.08, 0.02]
+    temp_lower = [20.0, 20.0]
+    temp_upper = [19.0, 19.0]  # no inversion either step
+    main_H = [120.0, 120.0]
     rn = [300.0, 300.0]
     g = [50.0, 50.0]
-    flags = ax.detect_vertical_advection(
+    flags, comp = ax.detect_vertical_advection(
+        vertical_w=vertical_w,
         temp_profile_lower=temp_lower,
         temp_profile_upper=temp_upper,
-        vertical_w=vertical_w,
         main_H=main_H,
         rn=rn,
         g=g,
+        return_components=True,
     )
     assert np.array_equal(flags, np.array([True, False]))
+    # t0 fires only on the w_bar signal; nothing else.
+    assert comp["w_significant"].tolist() == [True, False]
+    assert comp["supporting"].tolist() == [False, False]
+    assert comp["h_anomaly"].tolist() == [False, False]
 
 
-def test_detect_vertical_advection_H_anomaly():
-    # Inverted profile + H anomaly (H < 20 during daytime)
-    temp_lower = [15.0]
-    temp_upper = [16.0]
-    main_H = [10.0]
-    rn = [300.0]
-    g = [50.0]
+def test_detect_vertical_advection_w_threshold_kwarg():
+    # The threshold is exposed as a kwarg: raising it past |w_bar| suppresses
+    # the flag; lowering it (default 0.05) keeps it.
+    vertical_w = [0.06]
+    assert ax.detect_vertical_advection(vertical_w=vertical_w).tolist() == [True]
+    assert ax.detect_vertical_advection(
+        vertical_w=vertical_w, w_threshold=0.1
+    ).tolist() == [False]
+
+
+def test_detect_vertical_advection_supporting_gradient():
+    # Supporting signal: daytime (Rn - G > 50) AND a vertical T gradient of the
+    # advective sign (warm air aloft) flags even with a sub-threshold w_bar.
     flags = ax.detect_vertical_advection(
-        temp_profile_lower=temp_lower,
-        temp_profile_upper=temp_upper,
-        main_H=main_H,
-        rn=rn,
-        g=g,
+        vertical_w=[0.01],
+        temp_profile_lower=[15.0],
+        temp_profile_upper=[17.0],  # +2 K inversion -> advective sign
+        rn=[300.0],
+        g=[50.0],
     )
-    assert bool(flags[0]) is True
+    assert flags.tolist() == [True]
+    # Same gradient but at night (Rn - G <= 50) -> supporting signal withheld.
+    flags_night = ax.detect_vertical_advection(
+        vertical_w=[0.01],
+        temp_profile_lower=[15.0],
+        temp_profile_upper=[17.0],
+        rn=[40.0],
+        g=[10.0],
+    )
+    assert flags_night.tolist() == [False]
+
+
+def test_detect_vertical_advection_h_anomaly_secondary():
+    # Weak/secondary H-anomaly: low daytime H flags by default but can be
+    # switched off with use_h_anomaly=False.
+    kwargs = dict(
+        temp_profile_lower=[20.0],
+        temp_profile_upper=[19.0],
+        main_H=[10.0],
+        rn=[300.0],
+        g=[50.0],
+    )
+    assert ax.detect_vertical_advection(**kwargs).tolist() == [True]
+    assert ax.detect_vertical_advection(use_h_anomaly=False, **kwargs).tolist() == [
+        False
+    ]
 
 
 def test_detect_vertical_advection_no_data():
-    # Test handling of None values and missing data
+    # NaN/None handling: missing entries (None -> nan) are masked via np.isnan
+    # and never flag.
     temp_lower = [15.0, None]
     temp_upper = [16.0, 17.0]
     rn = [300.0, 300.0]
@@ -451,6 +492,7 @@ def test_detect_vertical_advection_no_data():
         temp_profile_lower=temp_lower, temp_profile_upper=temp_upper, rn=rn, g=g
     )
     assert len(flags) == 2
+    # t1 has a NaN lower temperature and a NaN g -> no signal can fire.
     assert bool(flags[1]) is False
 
 

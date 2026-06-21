@@ -256,23 +256,24 @@ def test_golden_detect_horizontal_temp_and_humidity_gradients():
 
 
 def test_golden_detect_vertical_full_case():
-    # t0: inversion (15 < 17 - 0.5) AND vertical motion (w = -0.1) -> True.
-    # t1: no inversion (20 vs 19) -> False.
+    # t0: |w_bar| = 0.1 > 0.05 m/s -> primary signal fires -> True.
+    # t1: |w_bar| = 0, no inversion (19 vs 20), healthy H -> no signal -> False.
     flags = ax.detect_vertical_advection(
+        vertical_w=[-0.1, 0.0],
         temp_profile_lower=[15.0, 20.0],
         temp_profile_upper=[17.0, 19.0],
-        vertical_w=[-0.1, 0.0],
         main_H=[5.0, 100.0],
         rn=[300.0, 300.0],
         g=[50.0, 50.0],
     )
     assert flags.tolist() == [True, False]
-    # PHYSICS: reasonable detection logic (inverted profile + motion/anomaly).
+    # PHYSICS: the planar-fit mean vertical velocity is the dominant signal for
+    # vertical advection (Lee 1998); ~0.05 m/s is energetically significant.
 
 
-def test_golden_detect_vertical_H_anomaly_branch():
-    # Inversion (15 < 16 - 0.5) AND H anomaly (H 10 < 20 during daytime) -> True,
-    # even with no vertical_w supplied.
+def test_golden_detect_vertical_supporting_branch():
+    # No w_bar: daytime (Rn - G = 250 > 50) AND a vertical T gradient of the
+    # advective sign (16 > 15 + 0.5, warm air aloft) fire the supporting signal.
     flags = ax.detect_vertical_advection(
         temp_profile_lower=[15.0],
         temp_profile_upper=[16.0],
@@ -281,8 +282,8 @@ def test_golden_detect_vertical_H_anomaly_branch():
         g=[50.0],
     )
     assert flags.tolist() == [True]
-    # PHYSICS: plausible flag, but anomalously low daytime H can have many
-    # causes; this is a screening heuristic, not a quantitative VAT term.
+    # PHYSICS: warm air aloft over a cooler surface gives (T_zm - <T>) > 0;
+    # paired with oasis subsidence this is the negative (energy-IN) VAT sign.
 
 
 def test_golden_compute_advection_fluxes_requires_upwind_and_distance():

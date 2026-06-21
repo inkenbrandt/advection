@@ -54,9 +54,10 @@ Step 3 – Flag advection
         g           = df["G"],
     )
     flags_v = advect_detect.detect_vertical_advection(
-        main_H = df["H"],
-        rn     = df["Rn"],
-        g      = df["G"],
+        vertical_w = df["w_bar"],   # planar-fit mean w (NOT raw sonic w)
+        main_H     = df["H"],
+        rn         = df["Rn"],
+        g          = df["G"],
     )
     df["adv_h"] = flags_h
     df["adv_v"] = flags_v

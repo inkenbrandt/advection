@@ -236,78 +236,174 @@ def detect_horizontal_advection(
 
 
 def detect_vertical_advection(
+    vertical_w=None,
+    *,
     temp_profile_lower=None,
     temp_profile_upper=None,
-    vertical_w=None,
     main_H=None,
     rn=None,
     g=None,
+    w_threshold=0.05,
+    rn_g_threshold=50.0,
+    temp_grad_threshold=0.5,
+    h_anomaly_threshold=20.0,
+    use_h_anomaly=True,
+    return_components=False,
 ):
-    """
-    Detect periods of vertical advection (vertical flux divergence) affecting the energy balance.
+    """Detect periods of energetically significant **vertical heat advection**.
+
+    Centred on the **planar-fit mean vertical velocity** ``w_bar`` (Lee 1998),
+    not on the ad hoc "inverted profile" heuristic the previous version used as a
+    gate. Lee (1998) shows that as ``|w_bar|`` approaches ~0.05 m/s the vertical
+    advection term
+
+    .. math:: VAT \\approx \\rho\\, C_p\\, \\bar{w}\\, (T_{zm} - \\langle T\\rangle)
+
+    becomes energetically significant (of order ``-100 W/m^2`` at midday in the
+    oasis regime; CLAUDE.md "Vertical heat advection", Wang 2024 Eq. 6). A small
+    mean vertical velocity is therefore, on its own, sufficient grounds to flag a
+    period -- it no longer has to co-occur with a temperature inversion.
+
+    Fully **vectorized** (no per-timestep Python loop). Missing data is carried as
+    ``np.nan`` and excluded from every comparison with :func:`numpy.isnan` (an
+    ``x is None`` test, used by the previous version, never fires on a float
+    ``ndarray`` and so silently failed to mask gaps). The returned mask is the
+    logical **OR** of the independent signals below.
+
+    .. warning::
+       ``vertical_w`` **must** be the **planar-fit (or otherwise tilt-corrected)
+       mean vertical velocity** ``w_bar``. The **raw sonic** ``w`` must **not** be
+       used: instrument tilt relative to the mean streamline biases ``w`` by far
+       more than the ~0.05 m/s threshold here, so an uncorrected ``w`` makes this
+       detector fire on tilt, not on real subsidence/uplift.
+
+    Detection signals
+    -----------------
+    1. **Primary -- significant mean vertical velocity** (Lee 1998). Fires where
+       ``|w_bar| > w_threshold`` (default 0.05 m/s). This is the dominant signal
+       and the basis of the rewrite. Needs ``vertical_w``.
+    2. **Supporting -- daytime vertical temperature gradient of the advective
+       sign.** Fires where the period is daytime (``Rn - G > rn_g_threshold``)
+       **and** temperature increases with height
+       (``temp_profile_upper > temp_profile_lower + temp_grad_threshold``). Warm
+       air aloft over a cooler surface gives ``(T_zm - <T>) > 0``; paired with the
+       typical oasis subsidence (``w_bar < 0``) this yields a **negative**
+       (downward, energy-IN) ``VAT`` -- the oasis advective sign under the
+       Moderow 2021 OUT-positive convention. Needs the two temperatures plus
+       ``rn`` and ``g``.
+    3. **Optional, weak/secondary -- anomalous daytime sensible heat.** Fires
+       where it is daytime and ``main_H < h_anomaly_threshold`` (very low or
+       downward ``H`` when it would normally be positive). This is a **screening
+       heuristic only**: anomalously low daytime ``H`` has many possible causes
+       (cloud, advection, instrument issues), so it is corroborating evidence at
+       best, never a quantitative ``VAT``. Disable it with ``use_h_anomaly=False``.
 
     Parameters
     ----------
-    temp_profile_lower : array-like, optional
-        Temperature near the surface or canopy (°C or K).
-    temp_profile_upper : array-like, optional
-        Temperature at the measurement height or above (°C or K).
     vertical_w : array-like, optional
-        Mean vertical wind speed (m/s) at the site (if available; usually small).
+        **Planar-fit mean vertical velocity** ``w_bar`` [m/s] -- see the warning
+        above. Scalars are broadcast. The primary detection signal.
+    temp_profile_lower : array-like, optional
+        Temperature near the surface/canopy [°C or K].
+    temp_profile_upper : array-like, optional
+        Temperature at (or above) the measurement height [°C or K], same units as
+        ``temp_profile_lower``.
     main_H : array-like, optional
-        Time series of sensible heat flux at the main tower (W/m^2).
+        Sensible heat flux ``H`` at the main tower [W/m^2] (H-anomaly signal).
     rn : array-like, optional
-        Net radiation (W/m^2) for context (to distinguish daytime).
+        Net radiation ``Rn`` [W/m^2] (daytime gate).
     g : array-like, optional
-        Soil heat flux (W/m^2) for context.
+        Soil/ground heat flux ``G`` [W/m^2] (daytime gate).
+    w_threshold : float, default 0.05
+        Magnitude of ``w_bar`` [m/s] above which vertical advection is treated as
+        energetically significant (Lee 1998).
+    rn_g_threshold : float, default 50.0
+        Available-energy threshold ``Rn - G`` [W/m^2] separating daytime from
+        nighttime/low-energy periods for the supporting and H-anomaly signals.
+    temp_grad_threshold : float, default 0.5
+        Minimum upper-minus-lower temperature difference [°C or K] counted as a
+        gradient of the advective sign (warm air aloft).
+    h_anomaly_threshold : float, default 20.0
+        Daytime ``H`` [W/m^2] below which the weak H-anomaly signal fires.
+    use_h_anomaly : bool, default True
+        Whether to include the weak/secondary H-anomaly signal in the mask.
+    return_components : bool, default False
+        If ``True`` also return the per-signal boolean arrays (see Returns).
 
     Returns
     -------
-    np.ndarray
-        Boolean mask of detected vertical advection periods.
+    numpy.ndarray
+        Boolean mask of detected vertical-advection periods (length matches the
+        input series).
+    tuple of (numpy.ndarray, dict)
+        If ``return_components`` is ``True``, ``(mask, components)`` with keys
+        ``'w_significant'``, ``'temp_gradient'``, ``'supporting'``,
+        ``'h_anomaly'`` and ``'daytime'`` -- each a length-``n`` boolean array.
+
+    References
+    ----------
+    Lee, X. (1998), on the significance of planar-fit mean vertical velocity for
+    vertical advection. Wang et al. (2024) Eq. 6 (``VAT``). Moderow et al. (2021)
+    OUT-positive sign convention.
     """
+    # Length is taken from the longest supplied series; scalars (length 1) and
+    # absent inputs (None) do not constrain it.
     n = 0
-    if temp_profile_lower is not None:
-        n = len(temp_profile_lower)
-    elif main_H is not None:
-        n = len(main_H)
-    vert_flag = np.zeros(n, dtype=bool)
-    for i in range(n):
-        # Daytime check
-        if rn is not None and g is not None:
-            if rn[i] is None or g[i] is None:
-                continue
-            if rn[i] - g[i] < 50:
-                continue  # skip nighttime or low-energy periods
-        # Check for inverted temperature profile (surface cooler than air above)
-        inv_profile = False
-        if temp_profile_lower is not None and temp_profile_upper is not None:
-            if temp_profile_lower[i] is not None and temp_profile_upper[i] is not None:
-                if (
-                    temp_profile_lower[i] < temp_profile_upper[i] - 0.5
-                ):  # >0.5°C inversion
-                    inv_profile = True
-        # Check for mean subsidence or upward transport
-        vertical_motion = False
-        if vertical_w is not None:
-            if vertical_w[i] is not None:
-                # If there's a consistent downward mean wind (negative w) or upward (positive w) outside a small range
-                if vertical_w[i] < -0.05 or vertical_w[i] > 0.05:
-                    vertical_motion = True
-        # Check for unusual H (e.g. H near zero or negative when it normally would be positive)
-        H_anomaly = False
-        if main_H is not None:
-            if main_H[i] is not None and rn is not None and rn[i] is not None:
-                if rn[i] > 50:  # daytime
-                    if (
-                        main_H[i] < 20
-                    ):  # very low or downward sensible heat during daytime
-                        H_anomaly = True
-        # Decide vertical advection flag:
-        # We require an inverted profile plus either some vertical motion or an H anomaly as evidence
-        if inv_profile and (vertical_motion or H_anomaly):
-            vert_flag[i] = True
-    return vert_flag
+    for series in (
+        vertical_w,
+        temp_profile_lower,
+        temp_profile_upper,
+        main_H,
+        rn,
+        g,
+    ):
+        if series is not None:
+            n = max(n, np.atleast_1d(np.asarray(series, dtype=float)).shape[0])
+
+    vertical_w = _as_float_series(vertical_w, n)
+    temp_profile_lower = _as_float_series(temp_profile_lower, n)
+    temp_profile_upper = _as_float_series(temp_profile_upper, n)
+    main_H = _as_float_series(main_H, n)
+    rn = _as_float_series(rn, n)
+    g = _as_float_series(g, n)
+
+    # --- daytime gate: available energy Rn - G above threshold ----------------
+    daytime = np.zeros(n, dtype=bool)
+    if rn is not None and g is not None:
+        avail_energy = rn - g
+        daytime = ~np.isnan(avail_energy) & (avail_energy > rn_g_threshold)
+
+    # --- Signal 1 (primary): significant planar-fit mean vertical velocity ----
+    w_significant = np.zeros(n, dtype=bool)
+    if vertical_w is not None:
+        w_significant = ~np.isnan(vertical_w) & (np.abs(vertical_w) > w_threshold)
+
+    # --- Signal 2 (supporting): daytime vertical T gradient of advective sign -
+    temp_gradient = np.zeros(n, dtype=bool)
+    if temp_profile_lower is not None and temp_profile_upper is not None:
+        valid = ~np.isnan(temp_profile_lower) & ~np.isnan(temp_profile_upper)
+        temp_gradient = valid & (
+            temp_profile_upper > temp_profile_lower + temp_grad_threshold
+        )
+    supporting = daytime & temp_gradient
+
+    # --- Signal 3 (optional, weak): anomalously low/downward daytime H --------
+    h_anomaly = np.zeros(n, dtype=bool)
+    if use_h_anomaly and main_H is not None:
+        h_anomaly = daytime & ~np.isnan(main_H) & (main_H < h_anomaly_threshold)
+
+    mask = w_significant | supporting | h_anomaly
+
+    if return_components:
+        components = {
+            "w_significant": w_significant,
+            "temp_gradient": temp_gradient,
+            "supporting": supporting,
+            "h_anomaly": h_anomaly,
+            "daytime": daytime,
+        }
+        return mask, components
+    return mask
 
 
 def _broadcast_series(value, n, *, name):
