@@ -414,6 +414,65 @@ def test_compute_advection_fluxes_oasis_hand_computed():
     assert -200.0 < res["HA_T"][0] < -150.0
 
 
+def test_oasis_signs():
+    """Integration: a canonical oasis must produce a self-consistent set of signs.
+
+    Oasis = warm dry air advected onto a cool wet transpiring surface. Built from
+    a single input dict so all four signs are asserted for the *same* case:
+
+    - warm upwind air (``T_upwind > T_main``) -> ``dT/dx < 0`` -> ``HA_T < 0``:
+      sensible heat advected INTO the field (Moderow OUT-positive => negative).
+    - dry upwind air (``q_upwind < q_main``) -> ``dq/dx > 0`` -> ``HA_Q > 0``:
+      the drying signal of dry-air advection.
+    - a stable internal boundary layer (cool surface, warm aloft) so the
+      measurement-height temperature exceeds the column mean (``T_zm > <T>``),
+      together with mean subsidence (``w_bar < 0``), gives
+      ``VAT = rho*Cp*w_bar*(T_zm - <T>) < 0``: warm air carried DOWN, heat INTO
+      the field.
+    - latent heat above available energy (``EF = LE/(Rn-G) > 1``, the
+      advective-input fingerprint) so ``H + LE > Rn - G`` and the raw closure
+      residual ``(H + LE) - (Rn - G) > 0``.
+
+    H is downward (negative) throughout -- the oasis sensible-heat signature.
+    """
+    distance = 100.0
+    main = {
+        "H": np.array([-30.0]),  # downward (negative) H -- oasis fingerprint
+        "LE": np.array([400.0]),  # LE > Rn-G (EF > 1): advective input
+        "Rn": np.array([300.0]),
+        "G": np.array([20.0]),
+        "T": 25.0,  # cool transpiring field; also T_zm at the measurement height
+        "q": 0.010,  # moist field
+        "u": 2.0,
+        "zm": 2.0,
+        "h": 0.5,
+        "P": 101325.0,
+        "w_bar": -0.03,  # planar-fit mean subsidence (downward)
+        "T_col": 23.0,  # column mean cooler than T_zm -> warm aloft (stable IBL)
+    }
+    upwind = {"T": 30.0, "q": 0.005}  # warm, dry air upwind
+    res = ax.compute_advection_fluxes(
+        main_data=main, upwind_data=upwind, tower_distance=distance
+    )
+
+    # 1) Horizontal heat advection: warm upwind -> energy INTO field -> negative.
+    assert res["HA_T"][0] < 0.0
+    # 2) Horizontal moisture advection: dry upwind -> drying -> positive.
+    assert res["HA_Q"][0] > 0.0
+    # 3) Vertical heat advection: subsidence of warm-aloft air -> INTO -> negative.
+    assert res["VAT"][0] < 0.0
+    # 4) Raw closure residual (H+LE)-(Rn-G): EF > 1 advective input -> positive.
+    assert res["residual"][0] > 0.0
+
+    # Cross-checks: residual matches the explicit budget and its deprecated alias;
+    # H_adv/V_adv alias HA_T/VAT. EF > 1 confirms the advective-input regime.
+    assert res["residual"][0] == pytest.approx((-30.0 + 400.0) - (300.0 - 20.0))
+    np.testing.assert_allclose(res["adv_in"], res["residual"])
+    np.testing.assert_allclose(res["H_adv"], res["HA_T"])
+    np.testing.assert_allclose(res["V_adv"], res["VAT"])
+    assert main["LE"][0] > (main["Rn"][0] - main["G"][0])  # EF > 1
+
+
 def test_compute_advection_fluxes_multi_upwind():
     distance = 50.0
     main = {

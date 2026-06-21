@@ -479,7 +479,24 @@ def compute_advection_fluxes(
     into-field (negative) sign with **no extra negation**; warmer upwind air
     gives ``HA_T < 0``. The moisture gradient uses the identical downwind-positive
     convention, ``dq/dx = (q_main - q_upwind)/tower_distance``, so drier upwind
-    air (``q_upwind < q_main``) gives ``dq/dx > 0`` and ``HA_Q > 0``.
+    air (``q_upwind < q_main``) gives ``dq/dx > 0`` and ``HA_Q > 0`` -- the
+    drying signal of dry-air advection.
+
+    For the **vertical** term the canonical oasis has a *stable* internal
+    boundary layer (cool wet surface, warm air aloft), so the measurement-height
+    temperature exceeds the column mean (``T_zm > <T>``, i.e. ``T_zm - <T> > 0``)
+    while the planar-fit mean motion is subsidence (``w_bar < 0``). Then
+    ``VAT = rho*Cp*w_bar*(T_zm - <T>) < 0``: warm air is carried **DOWN** into the
+    control volume, i.e. heat **INTO** the field -- negative under the OUT-positive
+    convention, the expected oasis vertical-advection sign.
+
+    Finally the diagnostic ``residual`` is defined here as ``(H + LE) - (Rn - G)``
+    -- the *negative* of the ``Rn - G - H - LE`` imbalance written in CLAUDE.md,
+    chosen so a **positive** value flags net energy advected **IN** (the legacy
+    ``adv_in`` reading). In the oasis the latent flux exceeds the available energy
+    (``EF = LE/(Rn-G) > 1``, the advective-input fingerprint), so
+    ``H + LE > Rn - G`` and ``residual > 0``. It is a closure *diagnostic*, never
+    an advective flux.
 
     Required inputs (a missing one RAISES, never silently returns zero)
     ------------------------------------------------------------------
@@ -703,6 +720,14 @@ def compute_advection_fluxes(
     # never be relabelled as advection (CLAUDE.md hard rule). Kept and returned
     # under the unambiguous name 'residual' (with 'adv_in' as a deprecated
     # alias for backward compatibility).
+    #
+    # SIGN: this is the *negative* of CLAUDE.md's "Residual = Rn - G - H - LE".
+    # The sign here is deliberate and matches the legacy 'adv_in' reading: a
+    # POSITIVE value means the turbulent fluxes exceed the available energy
+    # (H + LE > Rn - G), i.e. energy was advected IN. The oasis fingerprint is
+    # EF = LE/(Rn - G) > 1 (latent flux above available energy), which drives
+    # H + LE above Rn - G and therefore makes this residual POSITIVE. It is a
+    # diagnostic of advective input, not a flux subject to the OUT/IN sign rule.
     residual = (H_main + LE_main) - (Rn_main - G_main)
 
     # --- vertical mean heat advection VAT (Lee 1998; Wang Eq. 6) -------------
@@ -725,6 +750,13 @@ def compute_advection_fluxes(
             # T_zm is the main-tower air temperature at the measurement height;
             # difference against the column mean <T> in Kelvin (a K difference
             # equals a °C difference, so mixed °C/K inputs are handled).
+            #
+            # SIGN (Moderow OUT-positive): VAT = rho*Cp*w_bar*(T_zm - <T>). In the
+            # oasis the internal boundary layer is stable (cool wet surface, warm
+            # air aloft) so T_zm > <T> (dT > 0), and the planar-fit mean motion is
+            # subsidence (w_bar < 0); the product is therefore NEGATIVE -- warm air
+            # carried DOWN, heat INTO the field. No extra negation is applied: the
+            # OUT-positive sign falls straight out of the signed w_bar and dT.
             dT = _to_kelvin(T_main[i]) - _to_kelvin(T_col[i])
             VAT[i] = rho[i] * Cp[i] * w_bar[i] * dT
     else:
