@@ -57,6 +57,15 @@ def test_correct_sonic_heat_flux():
     assert pytest.approx(out) == expected
 
 
+def test_correct_sonic_heat_flux_zero_beta():
+    # If beta is 0, factor should be 1.0
+    w_Ts = 0.12
+    T_mean = 293.15
+    beta = 0.0
+    out = ax.correct_sonic_heat_flux(w_Ts, T_mean, beta)
+    assert out == w_Ts
+
+
 def test_compute_sensible_heat_flux():
     w_T_prime = 0.05  # K·m s⁻¹
     rho = 1.2  # kg m⁻³
@@ -115,6 +124,17 @@ def test_air_density():
     assert 0.9 * rho_dry <= rho <= 1.1 * rho_dry
 
 
+def test_air_density_high_humidity():
+    # q near 1
+    P = 101325.0
+    T = 300.0
+    q = 0.99
+    R_dry = 287.05
+    R_vap = 461.0
+    rho = ax.air_density(P, T, q, R_dry, R_vap)
+    assert rho > 0
+
+
 def test_latent_heat_vaporization_decreases_with_temp():
     Lv_0 = ax.latent_heat_vaporization(0.0)
     Lv_30 = ax.latent_heat_vaporization(30.0)
@@ -166,6 +186,36 @@ def test_detect_vertical_advection():
     assert np.array_equal(flags, np.array([True, False]))
 
 
+def test_detect_vertical_advection_H_anomaly():
+    # Inverted profile + H anomaly (H < 20 during daytime)
+    temp_lower = [15.0]
+    temp_upper = [16.0]
+    main_H = [10.0]
+    rn = [300.0]
+    g = [50.0]
+    flags = ax.detect_vertical_advection(
+        temp_profile_lower=temp_lower,
+        temp_profile_upper=temp_upper,
+        main_H=main_H,
+        rn=rn,
+        g=g,
+    )
+    assert bool(flags[0]) is True
+
+
+def test_detect_vertical_advection_no_data():
+    # Test handling of None values and missing data
+    temp_lower = [15.0, None]
+    temp_upper = [16.0, 17.0]
+    rn = [300.0, 300.0]
+    g = [50.0, None]
+    flags = ax.detect_vertical_advection(
+        temp_profile_lower=temp_lower, temp_profile_upper=temp_upper, rn=rn, g=g
+    )
+    assert len(flags) == 2
+    assert bool(flags[1]) is False
+
+
 def test_compute_advection_fluxes_balances():
     main = {
         "H": np.array([54.0, 64.0]),
@@ -180,6 +230,47 @@ def test_compute_advection_fluxes_balances():
     np.testing.assert_allclose(res["adv_in"], adv_in_expected)
     assert np.all(res["H_adv"] == 0.0)
     assert np.all(res["V_adv"] == 0.0)
+
+
+def test_compute_advection_fluxes_multi_upwind():
+    main = {
+        "H": np.array([10.0, 10.0]),
+        "LE": np.array([30.0, 30.0]),
+        "Rn": np.array([40.0, 40.0]),
+        "G": np.array([0.0, 0.0]),
+        "wind_dir": np.array([0.0, 180.0]),
+    }
+    upwind1 = {"H": np.array([50.0, 50.0]), "bearing": 0.0}
+    upwind2 = {"H": np.array([100.0, 100.0]), "bearing": 180.0}
+
+    # At t=0, wind is 0, should pick upwind1: H_adv = 50 - 10 = 40
+    # At t=1, wind is 180, should pick upwind2: H_adv = 100 - 10 = 90
+    res = ax.compute_advection_fluxes(main_data=main, upwind_data=[upwind1, upwind2])
+    np.testing.assert_allclose(res["H_adv"], [40.0, 90.0])
+
+
+def test_compute_advection_fluxes_with_masks():
+    main = {
+        "H": np.array([10.0, 10.0]),
+        "LE": np.array([30.0, 30.0]),
+        "Rn": np.array([40.0, 40.0]),
+        "G": np.array([0.0, 0.0]),
+    }
+    upwind = {"H": np.array([50.0, 50.0])}
+    det_h = np.array([True, False])
+    det_v = np.array([False, True])
+
+    res = ax.compute_advection_fluxes(
+        main_data=main,
+        upwind_data=upwind,
+        detect_horizontal=det_h,
+        detect_vertical=det_v,
+    )
+
+    # t=0: horizontal flagged, vertical not. H_adv = 50-10=40, V_adv = (40-40)-40 = -40
+    # t=1: horizontal NOT flagged, vertical flagged. H_adv = 0, V_adv = (40-40)-0 = 0
+    np.testing.assert_allclose(res["H_adv"], [40.0, 0.0])
+    np.testing.assert_allclose(res["V_adv"], [-40.0, 0.0])
 
 
 def test_apply_advection_correction_returns_keys():
