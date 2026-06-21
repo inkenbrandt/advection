@@ -57,13 +57,23 @@ Basic example of detecting advection and computing corrections:
     import numpy as np
     from advection import advect_detect, advection
 
-    # Example data
+    # Main (downwind) tower. Horizontal advection is a gradient term, so the
+    # main tower must also carry T, q (or RH), wind speed u, and the heights
+    # zm (measurement) and h (canopy); an upwind reference and the tower
+    # separation are required as well.
     main_data = {
         'H': [50, 60, -10],
         'LE': [200, 220, 50],
         'Rn': [300, 310, 100],
-        'G': [20, 25, 10]
+        'G': [20, 25, 10],
+        'T': [25, 26, 24],      # air temperature [°C or K]
+        'q': [0.010, 0.010, 0.011],  # specific humidity [kg/kg] (or 'RH' in %)
+        'u': [2.0, 2.5, 1.8],   # mean horizontal wind speed [m/s]
+        'zm': 2.0,              # measurement height [m]
+        'h': 0.3,               # canopy height [m]
     }
+    # Upwind (warmer, drier) reference tower.
+    upwind_data = {'T': [29, 30, 28], 'q': [0.005, 0.005, 0.006]}
 
     # Detect horizontal advection
     flags_h = advect_detect.detect_horizontal_advection(
@@ -73,13 +83,15 @@ Basic example of detecting advection and computing corrections:
         g=main_data['G']
     )
 
-    # Compute advection fluxes
+    # Compute advection fluxes (HA_T < 0 means heat advected INTO the field)
     out = advection.compute_advection_fluxes(
         main_data=main_data,
-        detect_horizontal=flags_h
+        upwind_data=upwind_data,
+        detect_horizontal=flags_h,
+        tower_distance=100.0,   # m between the main and upwind towers
     )
 
-    print(out['H_adv'])
+    print(out['HA_T'], out['HA_Q'])
 
 Features
 --------
