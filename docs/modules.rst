@@ -6,3 +6,4 @@ Modules
 
    advection.advection
    advection.advect_detect
+   advection.closure

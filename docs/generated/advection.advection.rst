@@ -21,3 +21,4 @@
       specific_heat_moist_air
       total_ground_heat_flux
       virtual_temperature
+      wpl_latent_heat_flux

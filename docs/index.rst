@@ -31,6 +31,7 @@ similar open-path systems.
 
    reference/advection
    reference/advect_detect
+   reference/closure
 
 Indices and tables
 ==================
