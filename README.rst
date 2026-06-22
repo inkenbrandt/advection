@@ -30,6 +30,24 @@ radiation minus ground heat flux (Rn - G). This package provides functions
 to calculate advective fluxes and apply corrections to improve energy balance
 closure, based on methods described by Wang et al. (2024).
 
+.. important::
+
+    **This library assumes any open-path LE/CO2 flux you provide has ALREADY
+    been WPL (Webb-Pearman-Leuning 1980) density-corrected.** The WPL correction
+    accounts for the dry-air density fluctuations that contaminate an open-path
+    vapour/CO2 covariance. It is a **mandatory, separate pre-processing step —
+    not an advection correction** — and this library does **not** apply it for
+    you. Run it (or confirm it has been run) in your eddy-covariance processing
+    chain *before* passing ``LE`` to any function here.
+
+    A thin convenience helper, ``advection.wpl_latent_heat_flux``, implements the
+    simplified form ``E = (1 + mu*MR) * [w'rho_v' + (rho_v/T)*w'T']`` with
+    ``mu = 1.6077``. It is intended for teaching and quick checks only; for
+    production work prefer an established processing package such as EddyPro,
+    EasyFlux, or your logger's online WPL routine, which also handle the
+    pressure term, coordinate rotation, and spectral corrections this helper
+    omits.
+
 Setup
 -----
 
@@ -100,6 +118,8 @@ Features
 * Compute advective heat and moisture fluxes.
 * Apply corrections to energy balance components.
 * Utility functions for atmospheric physics (air density, specific humidity, etc.).
+* Convenience WPL density-correction pre-step (``wpl_latent_heat_flux``); see the
+  note above — prefer EddyPro / established processing for production use.
 
 Credits
 -------

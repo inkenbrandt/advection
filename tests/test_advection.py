@@ -4,6 +4,7 @@
 
 import pytest
 import math
+import warnings
 import numpy as np
 import sys
 import os
@@ -211,6 +212,44 @@ def test_latent_heat_flux_bowen_near_minus_one_beta():
     with pytest.warns(UserWarning, match="singular"):
         out = ax.latent_heat_flux_bowen(Rn, G, beta_singular)
     assert math.isnan(out)
+
+
+def test_wpl_latent_heat_flux_known_case():
+    """LE = Lv * (1 + mu*MR) * [w'rho_v' + (rho_v/T)*w'T'] (Webb et al. 1980)."""
+    w_rhov = 1.0e-4  # kg m^-2 s^-1 (raw vapour covariance)
+    w_T = 0.1  # K m/s (kinematic sensible heat flux)
+    rho_v = 0.01  # kg/m^3
+    T = 300.0  # K
+    MR = 0.01  # kg/kg (vapour mass mixing ratio)
+    Lv = 2.45e6  # J/kg
+    mu = 1.6077
+
+    expected_E = (1.0 + mu * MR) * (w_rhov + (rho_v / T) * w_T)
+    expected_LE = Lv * expected_E
+    out = ax.wpl_latent_heat_flux(w_rhov, w_T, rho_v, T, MR, Lv=Lv)
+    assert pytest.approx(out, rel=1e-12) == expected_LE
+
+
+def test_wpl_latent_heat_flux_zero_correction_terms():
+    """With MR = 0 and w'T' = 0 the correction collapses to LE = Lv * w'rho_v'."""
+    w_rhov = 2.0e-4
+    Lv = 2.45e6
+    out = ax.wpl_latent_heat_flux(
+        w_rhov, w_T=0.0, rho_v=0.012, T=295.0, mixing_ratio=0.0, Lv=Lv
+    )
+    assert pytest.approx(out, rel=1e-12) == Lv * w_rhov
+
+
+def test_wpl_latent_heat_flux_default_lv_and_celsius():
+    """Lv defaults to latent_heat_vaporization(T); T accepts Celsius or Kelvin."""
+    w_rhov, w_T, rho_v, MR = 1.0e-4, 0.05, 0.011, 0.008
+    # 26.85 °C == 300 K; both must give the same result and use the same Lv.
+    Lv = ax.latent_heat_vaporization(300.0)
+    expected = Lv * (1 + 1.6077 * MR) * (w_rhov + (rho_v / 300.0) * w_T)
+    out_k = ax.wpl_latent_heat_flux(w_rhov, w_T, rho_v, 300.0, MR)
+    out_c = ax.wpl_latent_heat_flux(w_rhov, w_T, rho_v, 26.85, MR)
+    assert pytest.approx(out_k, rel=1e-9) == expected
+    assert pytest.approx(out_c, rel=1e-9) == out_k
 
 
 def test_compute_std_handles_nan():
@@ -1012,3 +1051,211 @@ def test_apply_advection_correction_nan_term_does_not_poison_sum():
     # Only HA_T + VAT = 110 is folded in (HA_Q NaN -> 0).
     np.testing.assert_allclose(out["H_plus_LE_corrected"][0], 260.0)
     assert np.isfinite(out["H_plus_LE_corrected"][0])
+
+
+# -----------------------------------------------------------------------------
+# closure.py tests (Twine et al. 2000 closure + EBR / residual diagnostics)
+# -----------------------------------------------------------------------------
+
+
+def test_bowen_ratio_closure_closes_budget_and_preserves_beta():
+    """BR closure must force H+LE -> Rn-G-S while keeping H/LE unchanged."""
+    Rn, G, H, LE = 500.0, 50.0, 100.0, 300.0  # H+LE = 400, avail = 450
+    S = 0.0
+    out = ax.bowen_ratio_closure(Rn, G, H, LE, S)
+    # Closure: the scaled fluxes sum to the available energy.
+    np.testing.assert_allclose(out["H"] + out["LE"], Rn - G - S)
+    # Bowen ratio preserved: H_closed/LE_closed == H/LE.
+    np.testing.assert_allclose(out["H"] / out["LE"], H / LE)
+    np.testing.assert_allclose(out["beta"], H / LE)
+    # The common scale factor is (Rn-G-S)/(H+LE).
+    np.testing.assert_allclose(out["factor"], (Rn - G - S) / (H + LE))
+    # Scalar input -> scalar (float) output.
+    assert isinstance(out["H"], float)
+
+
+def test_bowen_ratio_closure_with_storage_term():
+    """The storage term S reduces the available energy in the scale factor."""
+    Rn, G, H, LE = 500.0, 50.0, 100.0, 300.0
+    S = 30.0  # available energy = 420
+    out = ax.bowen_ratio_closure(Rn, G, H, LE, S)
+    np.testing.assert_allclose(out["H"] + out["LE"], Rn - G - S)
+    np.testing.assert_allclose(out["factor"], (Rn - G - S) / (H + LE))
+
+
+def test_bowen_ratio_closure_vectorized():
+    """BR closure works elementwise over series and returns arrays."""
+    Rn = np.array([500.0, 400.0])
+    G = np.array([50.0, 40.0])
+    H = np.array([100.0, 80.0])
+    LE = np.array([300.0, 200.0])
+    out = ax.bowen_ratio_closure(Rn, G, H, LE)
+    np.testing.assert_allclose(out["H"] + out["LE"], Rn - G)
+    np.testing.assert_allclose(out["H"] / out["LE"], H / LE)
+    assert isinstance(out["H"], np.ndarray)
+
+
+def test_bowen_ratio_closure_warns_in_oasis_regime():
+    """LE > (Rn-G-S) is the oasis case: BR closure must warn it is invalid."""
+    # Available energy 200, but LE = 260 > 200 -> EF > 1 (advective input).
+    with pytest.warns(UserWarning, match="oasis"):
+        out = ax.bowen_ratio_closure(300.0, 100.0, 40.0, 260.0)
+    # It still returns the (physically wrong) forced-closure numbers, which by
+    # construction shrink LE below the measured value -- exactly why it is wrong.
+    np.testing.assert_allclose(out["H"] + out["LE"], 200.0)
+    assert out["LE"] < 260.0
+
+
+def test_bowen_ratio_closure_oasis_warning_can_be_silenced():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any warning would raise
+        ax.bowen_ratio_closure(300.0, 100.0, 40.0, 260.0, warn_oasis=False)
+
+
+def test_bowen_ratio_closure_singular_turbulent_sum_is_nan():
+    """H+LE == 0 makes the scale factor undefined -> NaN (with a warning)."""
+    with pytest.warns(UserWarning, match="singular"):
+        out = ax.bowen_ratio_closure(400.0, 50.0, 100.0, -100.0)
+    assert np.isnan(out["factor"])
+    assert np.isnan(out["H"])
+    assert np.isnan(out["LE"])
+
+
+def test_residual_le_closure_assigns_full_residual_to_le():
+    """Residual-LE closure: LE = Rn - G - S - H, H untouched."""
+    Rn, G, H, S = 500.0, 50.0, 120.0, 0.0
+    LE = ax.residual_le_closure(Rn, G, H, S)
+    np.testing.assert_allclose(LE, Rn - G - S - H)
+    # The forced budget closes exactly with the original H.
+    np.testing.assert_allclose(H + LE, Rn - G - S)
+    assert isinstance(LE, float)
+
+
+def test_residual_le_closure_with_storage_and_arrays():
+    Rn = np.array([500.0, 400.0])
+    G = np.array([50.0, 40.0])
+    H = np.array([120.0, 90.0])
+    S = np.array([20.0, 10.0])
+    LE = ax.residual_le_closure(Rn, G, H, S)
+    np.testing.assert_allclose(LE, Rn - G - S - H)
+    np.testing.assert_allclose(H + LE, Rn - G - S)
+    assert isinstance(LE, np.ndarray)
+
+
+def test_residual_le_vs_bowen_ratio_bracket_partition():
+    """The two Twine methods close the same budget but partition differently."""
+    Rn, G, H, LE = 500.0, 50.0, 100.0, 300.0  # under-closure: H+LE=400 < 450
+    br = ax.bowen_ratio_closure(Rn, G, H, LE)
+    le_res = ax.residual_le_closure(Rn, G, H)
+    # Both close the budget...
+    np.testing.assert_allclose(br["H"] + br["LE"], Rn - G)
+    np.testing.assert_allclose(H + le_res, Rn - G)
+    # ...but residual-LE holds H fixed while BR rescales it.
+    assert le_res != br["LE"]
+    np.testing.assert_allclose(le_res, Rn - G - H)
+
+
+def test_energy_balance_residual_claude_convention():
+    """Residual = Rn - G - J - H - LE; positive == under-closure gap."""
+    res = ax.energy_balance_residual(500.0, 50.0, 100.0, 300.0)
+    np.testing.assert_allclose(res, 500.0 - 50.0 - 0.0 - 100.0 - 300.0)
+    assert res > 0.0  # under-closure
+    # With a storage term J.
+    res_J = ax.energy_balance_residual(500.0, 50.0, 100.0, 300.0, J=20.0)
+    np.testing.assert_allclose(res_J, res - 20.0)
+    # Sign is the negation of compute_advection_fluxes' (H+LE)-(Rn-G) diagnostic.
+    legacy = (100.0 + 300.0) - (500.0 - 50.0)
+    np.testing.assert_allclose(res, -legacy)
+
+
+def test_energy_balance_ratio_definition():
+    """EBR = sum(H+LE)/sum(Rn-G-J)."""
+    H = np.array([50.0, 60.0, 70.0])
+    LE = np.array([200.0, 210.0, 220.0])
+    Rn = np.array([400.0, 420.0, 440.0])
+    G = np.array([40.0, 42.0, 44.0])
+    expected = np.sum(H + LE) / np.sum(Rn - G)
+    assert pytest.approx(ax.energy_balance_ratio(H, LE, Rn, G)) == expected
+    # A perfectly closed series gives EBR == 1.
+    assert pytest.approx(ax.energy_balance_ratio(H, Rn - G - H, Rn, G)) == 1.0
+
+
+def test_energy_balance_ratio_complete_case_masking():
+    """A NaN in any component drops that whole timestep from both sums."""
+    H = np.array([50.0, np.nan, 70.0])
+    LE = np.array([200.0, 210.0, 220.0])
+    Rn = np.array([400.0, 420.0, 440.0])
+    G = np.array([40.0, 42.0, 44.0])
+    # Step 1 is excluded entirely (H is NaN): only steps 0 and 2 count.
+    expected = ((50.0 + 200.0) + (70.0 + 220.0)) / ((400.0 - 40.0) + (440.0 - 44.0))
+    assert pytest.approx(ax.energy_balance_ratio(H, LE, Rn, G)) == expected
+
+
+def test_energy_balance_ratio_all_nan_warns_and_returns_nan():
+    with pytest.warns(UserWarning):
+        out = ax.energy_balance_ratio(
+            np.array([np.nan]), np.array([np.nan]), np.array([1.0]), np.array([0.0])
+        )
+    assert np.isnan(out)
+
+
+def test_closure_slope_perfect_closure():
+    """Turbulent sum == available energy -> slope 1, intercept 0, R^2 == 1."""
+    Rn = np.array([100.0, 200.0, 300.0, 400.0])
+    G = np.array([10.0, 20.0, 30.0, 40.0])
+    avail = Rn - G
+    # H+LE exactly equals available energy.
+    H = 0.3 * avail
+    LE = 0.7 * avail
+    out = ax.closure_slope(H, LE, Rn, G)
+    assert pytest.approx(out["slope"], abs=1e-9) == 1.0
+    assert pytest.approx(out["intercept"], abs=1e-9) == 0.0
+    assert pytest.approx(out["r_squared"], abs=1e-9) == 1.0
+    assert out["n"] == 4
+
+
+def test_closure_slope_under_closure_slope_below_one():
+    """A consistent 0.8 under-closure must recover slope ~0.8."""
+    Rn = np.array([100.0, 200.0, 300.0, 400.0, 500.0])
+    G = np.zeros(5)
+    avail = Rn - G
+    turbulent = 0.8 * avail
+    H = 0.25 * turbulent
+    LE = 0.75 * turbulent
+    out = ax.closure_slope(H, LE, Rn, G)
+    assert pytest.approx(out["slope"], abs=1e-9) == 0.8
+    assert pytest.approx(out["intercept"], abs=1e-9) == 0.0
+
+
+def test_closure_slope_force_origin():
+    """force_origin pins the intercept at exactly 0."""
+    rng = np.random.default_rng(1)
+    avail = np.linspace(50.0, 500.0, 30)
+    turbulent = 0.85 * avail + rng.normal(0.0, 5.0, avail.size)
+    H = 0.3 * turbulent
+    LE = 0.7 * turbulent
+    Rn = avail
+    G = np.zeros_like(avail)
+    out = ax.closure_slope(H, LE, Rn, G, force_origin=True)
+    assert out["intercept"] == 0.0
+    assert 0.7 < out["slope"] < 1.0
+
+
+def test_closure_slope_drops_nan_pairs():
+    Rn = np.array([100.0, 200.0, np.nan, 400.0])
+    G = np.zeros(4)
+    H = np.array([30.0, 60.0, 90.0, 120.0])
+    LE = np.array([50.0, 100.0, 150.0, np.nan])
+    out = ax.closure_slope(H, LE, Rn, G)
+    # Steps 2 (NaN Rn) and 3 (NaN LE) dropped -> only 2 finite pairs remain.
+    assert out["n"] == 2
+
+
+def test_closure_slope_too_few_points_raises():
+    with pytest.raises(ValueError):
+        ax.closure_slope(
+            np.array([np.nan, 1.0]),
+            np.array([1.0, np.nan]),
+            np.array([1.0, 2.0]),
+            np.array([0.0, 0.0]),
+        )

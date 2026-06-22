@@ -6,3 +6,4 @@ __version__ = "0.1.0"
 
 from .advect_detect import *
 from .advection import *
+from .closure import *

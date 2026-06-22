@@ -708,7 +708,10 @@ def compute_advection_fluxes(
         Main-tower series. Required keys:
 
         - ``'H'``  : sensible heat flux [W/m^2]
-        - ``'LE'`` : latent heat flux [W/m^2]
+        - ``'LE'`` : latent heat flux [W/m^2]. Open-path ``LE`` is assumed
+          **already WPL (Webb-Pearman-Leuning 1980) density-corrected** — a
+          mandatory separate pre-step, not an advection fix (see
+          :func:`advection.advection.wpl_latent_heat_flux`).
         - ``'Rn'`` : net radiation [W/m^2]
         - ``'G'``  : ground heat flux [W/m^2]
         - ``'T'``  : air temperature [°C or K]

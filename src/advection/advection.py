@@ -395,6 +395,13 @@ def latent_heat_flux_residual(Rnet, G, H):
 
     Implements Eq. 6: λE = R_net - G - H.
 
+    .. note::
+
+        Any **measured** open-path ``LE`` you compare against this estimate is
+        assumed to be **already WPL (Webb-Pearman-Leuning 1980) density-corrected**.
+        WPL is a mandatory, separate pre-step (not an advection fix); see
+        :func:`wpl_latent_heat_flux` and the package README.
+
     Parameters
     ----------
     Rnet : float
@@ -417,6 +424,13 @@ def latent_heat_flux_bowen(Rnet, G, beta, singular_tol=1e-6):
     Compute latent heat flux (λE) using the Bowen ratio method (no fast data needed).
 
     Implements Eq. 7: λE = (R_net - G) / (1 + beta).
+
+    .. note::
+
+        Any **measured** open-path ``LE`` you compare against this estimate is
+        assumed to be **already WPL (Webb-Pearman-Leuning 1980) density-corrected**.
+        WPL is a mandatory, separate pre-step (not an advection fix); see
+        :func:`wpl_latent_heat_flux` and the package README.
 
     The denominator ``1 + beta`` is order-unity for typical periods, but it
     passes through zero as ``beta -> -1`` -- a value that can occur in the
@@ -495,6 +509,93 @@ def latent_heat_flux_bowen(Rnet, G, beta, singular_tol=1e-6):
         return float("nan")
 
     return (Rnet - G) / denom
+
+
+def wpl_latent_heat_flux(
+    w_rhov,
+    w_T,
+    rho_v,
+    T,
+    mixing_ratio,
+    Lv=None,
+    mu=MU,
+):
+    r"""Convenience WPL (Webb-Pearman-Leuning 1980) density-corrected latent heat flux.
+
+    .. important::
+
+        This is a **convenience pre-step**, *not* part of the advection
+        accounting this library performs. The rest of :mod:`advection` assumes
+        any open-path ``LE``/CO2 flux it is given has **already** been WPL
+        density-corrected (see :func:`latent_heat_flux_residual`,
+        :func:`latent_heat_flux_bowen`,
+        :func:`advection.closure.bowen_ratio_closure` and the package README).
+        WPL is a mandatory, *separate* pre-processing step — it accounts for the
+        density fluctuations of dry air that contaminate an open-path vapour
+        covariance, and it is **not** an advection correction.
+
+    .. caution::
+
+        Prefer an established eddy-covariance processing package (e.g. EddyPro,
+        EasyFlux, or your logger's online WPL routine) for production work. This
+        helper implements only the **simplified** form below — it omits the
+        ambient-pressure fluctuation term and assumes the inputs are already
+        coordinate-rotated, despiked, and frequency-response corrected. Use it
+        for teaching, quick checks, or when you have the raw covariances but no
+        full processing chain, not as a substitute for validated software.
+
+    Implements the simplified Webb et al. (1980) water-vapour flux::
+
+        E = (1 + mu * MR) * [ w'rho_v' + (rho_v / T) * w'T' ]     # kg m^-2 s^-1
+        LE = Lv * E                                               # W/m^2
+
+    with ``mu = M_d / M_v = 1.6077`` (:data:`advection._constants.MU`). The first
+    bracket term is the raw (uncorrected) vapour covariance; the second adds the
+    thermal-expansion contribution ``(rho_v / T) * w'T'``; the ``(1 + mu*MR)``
+    prefactor is the dry-air dilution correction. ``T`` is passed through
+    :func:`_to_kelvin`, so Celsius or Kelvin may be supplied (the ratio
+    ``rho_v / T`` requires an absolute temperature).
+
+    Parameters
+    ----------
+    w_rhov : float
+        Raw covariance of vertical wind and water-vapour density,
+        ``w'rho_v'`` [kg m^-2 s^-1] — the *uncorrected* open-path vapour flux.
+    w_T : float
+        Kinematic sensible-heat flux ``w'T'`` [K m/s].
+    rho_v : float
+        Mean water-vapour (mass) density [kg/m^3].
+    T : float
+        Mean air temperature [°C or K]; converted to Kelvin via
+        :func:`_to_kelvin`.
+    mixing_ratio : float
+        Water-vapour **mass mixing ratio** ``MR = rho_v / rho_d`` [kg/kg]
+        (vapour mass per unit mass of *dry* air).
+    Lv : float, optional
+        Latent heat of vaporization [J/kg]. If ``None``, uses
+        ``latent_heat_vaporization(T)``.
+    mu : float, optional
+        Ratio of molar masses ``M_d / M_v`` [dimensionless]; default
+        :data:`~advection._constants.MU` (1.6077).
+
+    Returns
+    -------
+    float
+        WPL density-corrected latent heat flux ``LE`` [W/m^2].
+
+    References
+    ----------
+    Webb, E. K., Pearman, G. I., & Leuning, R. (1980), *Correction of flux
+    measurements for density effects due to heat and water vapour transfer*,
+    Q. J. R. Meteorol. Soc. 106, 85-100.
+    """
+    T = _to_kelvin(T)
+    if Lv is None:
+        Lv = latent_heat_vaporization(T)
+    # Eq.: dry-air dilution prefactor times (raw vapour covariance + thermal
+    # expansion term). E is the corrected vapour mass flux [kg m^-2 s^-1].
+    E = (1.0 + mu * mixing_ratio) * (w_rhov + (rho_v / T) * w_T)
+    return Lv * E
 
 
 def compute_std(series):
