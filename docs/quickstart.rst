@@ -98,8 +98,16 @@ Step 4 – Compute & apply flux corrections
 
     corrected = advection.apply_advection_correction(
         main_data = df[["H", "LE", "Rn", "G"]].to_dict("list"),
-        H_adv = out["H_adv"], V_adv = out["VAT"],
+        H_adv = out["H_adv"], V_adv = out["VAT"], HA_Q = out["HA_Q"],
+        rn_min = 75.0,                # Wang (2024) conditional-inclusion gate
     )
+    # Advective terms are folded onto the turbulent-sum side
+    #   (Rn - G = H + LE + HA_T + HA_Q + VAT)
+    # but ONLY at timesteps where Wang's gate passes:
+    #   Rn > rn_min AND (H + LE) < (Rn - G).
+    # corrected["H_plus_LE_corrected"] vs ["H_plus_LE_orig"], the residual before
+    # /after (["residual_corrected"] vs ["residual_orig"]) and the boolean
+    # ["included"] mask report exactly which steps were corrected.
 
 ---
 

@@ -982,47 +982,158 @@ def compute_advection_fluxes(
     }
 
 
-def apply_advection_correction(main_data, H_adv, V_adv):
-    """
-    Apply advection correction to the main tower energy balance components.
+def apply_advection_correction(main_data, H_adv, V_adv, HA_Q=None, rn_min=75.0):
+    r"""
+    Fold measured advective fluxes into the surface energy balance.
 
-    This function adds the advection terms to the energy balance and returns an updated dataset.
+    Energy-balance bookkeeping (Moderow et al. 2021; Wang et al. 2024)
+    -----------------------------------------------------------------
+    The advection-augmented surface energy balance, written in the Moderow et al.
+    (2021) **OUT-positive** convention (positive flux = energy *out* of the
+    control volume), places the advective terms on the **turbulent-sum side**
+    alongside ``H`` and ``LE`` -- the available-energy side ``(Rn - G)`` is left
+    untouched::
+
+        Rn - G = H + LE + HA_T + HA_Q + VAT
+
+    so the corrected turbulent + advective sum is::
+
+        (H + LE)_corrected = H + LE + HA_T + HA_Q + VAT
+
+    Each advective term carries its own sign from the upstream computation
+    (:func:`compute_advection_fluxes`): a **negative** term is energy advected
+    **INTO** the field (the oasis fingerprint), a **positive** term is energy
+    advected **OUT**. This function neither re-signs nor re-derives the terms --
+    it simply adds them on the turbulent side. The residual is reported in the
+    ``CLAUDE.md`` convention ``Residual = Rn - G - H - LE`` (positive = available
+    energy exceeds the turbulent sum), so the correction moves a gated step's
+    residual toward zero.
+
+    Conditional inclusion gate (Wang et al. 2024)
+    ---------------------------------------------
+    The advective fluxes are folded in **only** at timesteps where **both**
+    Wang's conditions hold (this is what lifted closure from 89 % to 97 % in the
+    alfalfa study):
+
+    1. ``Rn > rn_min`` (default 75 W/m^2) -- sufficient daytime radiative
+       forcing, **AND**
+    2. ``(H + LE) < (Rn - G)`` -- the (spectrally-corrected) turbulent sum is
+       *below* the available energy, i.e. there is an under-closure gap for the
+       advected energy to fill.
+
+    Where the gate fails (night, low ``Rn``, or already-over-closed steps) the
+    timestep is left **exactly uncorrected**: ``(H + LE)_corrected == H + LE``.
+    The boolean ``'included'`` mask records which timesteps were corrected.
+
+    ``NaN`` handling
+    ----------------
+    A ``NaN`` in any of ``Rn``/``G``/``H``/``LE`` makes the gate comparisons
+    ``False`` for that step, so it is left uncorrected (never silently forced
+    closed). A ``NaN`` in an advective term contributes **0** to the corrected
+    sum (an unmeasured advective component adds nothing) rather than poisoning
+    the whole corrected sum with ``NaN``.
 
     Parameters
     ----------
     main_data : dict
-        Dictionary of main tower data (must contain 'H', 'LE', 'Rn', 'G').
+        Main-tower energy balance. Required keys ``'H'``, ``'LE'``, ``'Rn'``,
+        ``'G'`` [all W/m^2], each a length-``n`` series.
     H_adv : array-like
-        Horizontal advection flux time series (W/m^2).
-    V_adv : array-like
-        Vertical advection flux time series (W/m^2).
+        Horizontal **heat** advection ``HA_T`` [W/m^2] (Wang Eq. 5a; the
+        ``'H_adv'`` / ``'HA_T'`` output of :func:`compute_advection_fluxes`).
+    V_adv : array-like or None
+        Vertical **heat** advection ``VAT`` [W/m^2] (Wang Eq. 6; the ``'V_adv'``
+        / ``'VAT'`` output of :func:`compute_advection_fluxes`). ``None`` (e.g. a
+        horizontal-only call) is treated as all-zero (no vertical advection).
+    HA_Q : array-like or None, optional
+        Horizontal **moisture** advection ``HA_Q`` [W/m^2] (Wang Eq. 5b). ``None``
+        (default) is treated as all-zero, preserving the legacy three-argument
+        call signature.
+    rn_min : float, optional
+        Net-radiation threshold [W/m^2] for Wang's gate condition (1). Default
+        75 W/m^2.
 
     Returns
     -------
     dict
-        Corrected energy balance components, including:
-        'Rn', 'G', 'H', 'LE', 'H_adv', 'V_adv', 'H_plus_LE_orig', 'H_plus_LE_corrected'.
+        Keys:
+
+        - ``'Rn'``, ``'G'``, ``'H'``, ``'LE'`` : the input series (float arrays).
+        - ``'HA_T'`` / ``'H_adv'`` : horizontal heat advection [W/m^2].
+        - ``'HA_Q'`` : horizontal moisture advection [W/m^2].
+        - ``'VAT'`` / ``'V_adv'`` : vertical heat advection [W/m^2].
+        - ``'H_plus_LE_orig'`` : uncorrected turbulent sum ``H + LE`` [W/m^2].
+        - ``'H_plus_LE_corrected'`` : turbulent sum with the gated advective
+          terms folded in [W/m^2].
+        - ``'available_energy'`` : ``Rn - G`` [W/m^2] (unchanged by the
+          correction; the target the turbulent sum is compared against).
+        - ``'residual_orig'`` : ``Rn - G - H - LE`` [W/m^2] before correction.
+        - ``'residual_corrected'`` : ``Rn - G - (H + LE)_corrected`` [W/m^2]
+          after correction.
+        - ``'included'`` : boolean mask, ``True`` where Wang's gate passed and
+          the advective terms were applied.
+
+    References
+    ----------
+    Moderow et al. (2021), OUT-positive sign convention and advection terms.
+    Wang et al. (2024), conditional-inclusion rule and Eqs. 5a/5b/6.
     """
-    H_main = np.array(main_data["H"])
-    LE_main = np.array(main_data["LE"])
-    Rn_main = np.array(main_data["Rn"])
-    G_main = np.array(main_data["G"])
-    H_adv = np.array(H_adv)
-    V_adv = np.array(V_adv)
-    # Original and corrected turbulent flux sums
-    H_plus_LE = H_main + LE_main
-    H_plus_LE_corrected = (
-        H_main + LE_main
-    )  # (We'll use separate terms rather than adjusting H or LE)
-    # In the "corrected" sense, H+LE_corrected is conceptually H+LE plus any included adv fluxes (though we keep them separate)
-    # We output H_adv and V_adv separately rather than lumping into H or LE.
+    H_main = np.asarray(main_data["H"], dtype=float)
+    LE_main = np.asarray(main_data["LE"], dtype=float)
+    Rn_main = np.asarray(main_data["Rn"], dtype=float)
+    G_main = np.asarray(main_data["G"], dtype=float)
+    n = len(H_main)
+
+    # Advective terms: None -> all-zero (term not supplied for this call);
+    # scalars are broadcast to length n by the helper.
+    def _adv_series(value):
+        arr = _as_float_series(value, n)
+        return np.zeros(n) if arr is None else arr
+
+    HA_T = _adv_series(H_adv)
+    HA_Q_series = _adv_series(HA_Q)
+    VAT = _adv_series(V_adv)
+
+    available_energy = Rn_main - G_main
+    H_plus_LE_orig = H_main + LE_main
+
+    # --- Wang (2024) conditional-inclusion gate ------------------------------
+    # Include advection only where BOTH (1) Rn > rn_min and (2) the turbulent
+    # sum is below the available energy. NaN comparisons evaluate False, so any
+    # missing budget component leaves the step uncorrected.
+    with np.errstate(invalid="ignore"):
+        included = (Rn_main > rn_min) & (H_plus_LE_orig < available_energy)
+    included = np.asarray(included, dtype=bool)
+
+    # --- fold the advective terms onto the turbulent-sum side ----------------
+    # NaN advective components contribute 0 (an unmeasured term adds nothing),
+    # so a single missing term cannot poison the whole corrected sum.
+    adv_total = (
+        np.nan_to_num(HA_T, nan=0.0)
+        + np.nan_to_num(HA_Q_series, nan=0.0)
+        + np.nan_to_num(VAT, nan=0.0)
+    )
+    applied = np.where(included, adv_total, 0.0)
+    H_plus_LE_corrected = H_plus_LE_orig + applied
+
+    # Residuals in the CLAUDE.md convention: Residual = Rn - G - H - LE.
+    residual_orig = available_energy - H_plus_LE_orig
+    residual_corrected = available_energy - H_plus_LE_corrected
+
     return {
         "Rn": Rn_main,
         "G": G_main,
         "H": H_main,
         "LE": LE_main,
-        "H_adv": H_adv,
-        "V_adv": V_adv,
-        "H_plus_LE_orig": H_plus_LE,
-        "H_plus_LE_corrected": H_plus_LE_corrected,  # (same numeric values as original; adv terms separate)
+        "HA_T": HA_T,
+        "H_adv": HA_T,  # backward-compatible alias of HA_T
+        "HA_Q": HA_Q_series,
+        "VAT": VAT,
+        "V_adv": VAT,  # backward-compatible alias of VAT
+        "H_plus_LE_orig": H_plus_LE_orig,
+        "H_plus_LE_corrected": H_plus_LE_corrected,
+        "available_energy": available_energy,
+        "residual_orig": residual_orig,
+        "residual_corrected": residual_corrected,
+        "included": included,
     }

@@ -919,9 +919,96 @@ def test_apply_advection_correction_returns_keys():
         "G",
         "H",
         "LE",
+        "HA_T",
         "H_adv",
+        "HA_Q",
+        "VAT",
         "V_adv",
         "H_plus_LE_orig",
         "H_plus_LE_corrected",
+        "available_energy",
+        "residual_orig",
+        "residual_corrected",
+        "included",
     }
     assert expected_keys.issubset(out.keys())
+
+
+def test_apply_advection_correction_gate_fails_leaves_step_unchanged():
+    # Two steps, both with a turbulent under-closure gap (H+LE < Rn-G) and the
+    # SAME nonzero advective terms. Step 0 has Rn below rn_min (gate condition 1
+    # fails); step 1 has Rn above it. Only step 1 may be corrected.
+    main = {
+        "H": np.array([20.0, 20.0]),
+        "LE": np.array([40.0, 40.0]),  # H+LE = 60
+        "Rn": np.array([70.0, 200.0]),  # step 0: Rn < 75 (gate fails)
+        "G": np.array([10.0, 10.0]),  # Rn-G = 60 (step0), 190 (step1)
+    }
+    HA_T = np.array([-15.0, -15.0])
+    HA_Q = np.array([5.0, 5.0])
+    VAT = np.array([20.0, 20.0])  # adv_total = +10 at every step
+
+    out = ax.apply_advection_correction(main, HA_T, VAT, HA_Q=HA_Q, rn_min=75.0)
+
+    # Step 0: Rn=70 < 75 -> gate fails -> left exactly uncorrected.
+    assert out["included"][0] == False  # noqa: E712
+    assert out["H_plus_LE_corrected"][0] == out["H_plus_LE_orig"][0] == 60.0
+    assert out["residual_corrected"][0] == out["residual_orig"][0]
+
+    # Step 1: Rn=200 > 75 and H+LE=60 < Rn-G=190 -> included; adv_total=+10
+    # folded onto the turbulent side.
+    assert out["included"][1] == True  # noqa: E712
+    np.testing.assert_allclose(out["H_plus_LE_corrected"][1], 70.0)
+
+
+def test_apply_advection_correction_oasis_step_improves_closure():
+    # An advective-input ("oasis") daytime step with an under-closure gap:
+    # warm/dry air advects energy the EC system did not capture in H+LE, so the
+    # measured turbulent sum sits below the available energy. Folding the gated
+    # advective terms in must move (H+LE) toward (Rn-G) and shrink |residual|.
+    main = {
+        "H": np.array([30.0]),
+        "LE": np.array([120.0]),  # H+LE = 150
+        "Rn": np.array([420.0]),  # Rn > rn_min
+        "G": np.array([40.0]),  # Rn-G = 380 -> gap of 230 (under-closure)
+    }
+    # Net advective input of +120 W/m^2 (still short of fully closing the gap,
+    # so no overshoot): HA_T + HA_Q + VAT = 70 + 10 + 40 = 120.
+    HA_T = np.array([70.0])
+    HA_Q = np.array([10.0])
+    VAT = np.array([40.0])
+
+    out = ax.apply_advection_correction(main, HA_T, VAT, HA_Q=HA_Q)
+
+    assert out["included"][0] == True  # noqa: E712
+    # Available energy is untouched; only the turbulent sum moves.
+    np.testing.assert_allclose(out["available_energy"][0], 380.0)
+    np.testing.assert_allclose(out["H_plus_LE_orig"][0], 150.0)
+    np.testing.assert_allclose(out["H_plus_LE_corrected"][0], 270.0)
+    # Corrected sum is strictly closer to available energy than the original.
+    gap_before = abs(out["available_energy"][0] - out["H_plus_LE_orig"][0])
+    gap_after = abs(out["available_energy"][0] - out["H_plus_LE_corrected"][0])
+    assert gap_after < gap_before
+    # Equivalently, |residual| shrinks toward zero.
+    assert abs(out["residual_corrected"][0]) < abs(out["residual_orig"][0])
+
+
+def test_apply_advection_correction_nan_term_does_not_poison_sum():
+    # A NaN in one advective component contributes 0 rather than NaN-ing the
+    # whole corrected sum; the other terms still apply at a gated step.
+    main = {
+        "H": np.array([30.0]),
+        "LE": np.array([120.0]),
+        "Rn": np.array([420.0]),
+        "G": np.array([40.0]),
+    }
+    out = ax.apply_advection_correction(
+        main,
+        np.array([70.0]),  # HA_T
+        np.array([40.0]),  # VAT
+        HA_Q=np.array([np.nan]),  # missing moisture term
+    )
+    assert out["included"][0] == True  # noqa: E712
+    # Only HA_T + VAT = 110 is folded in (HA_Q NaN -> 0).
+    np.testing.assert_allclose(out["H_plus_LE_corrected"][0], 260.0)
+    assert np.isfinite(out["H_plus_LE_corrected"][0])

@@ -379,7 +379,11 @@ def test_golden_compute_advection_fluxes_with_masks():
     np.testing.assert_allclose(res["V_adv"], res["VAT"])  # backward-compat alias
 
 
-def test_golden_apply_advection_correction_is_identity_on_sum():
+def test_golden_apply_advection_correction_zero_terms_is_identity_on_sum():
+    # With zero advective terms the corrected sum equals the original sum
+    # regardless of the gate (adding 0 changes nothing). This pins the
+    # no-advection baseline now that the function actually folds in nonzero
+    # terms (see test_advection.py for the gated-correction behavior).
     main = {
         "H": np.array([10.0, 20.0]),
         "LE": np.array([30.0, 40.0]),
@@ -387,24 +391,36 @@ def test_golden_apply_advection_correction_is_identity_on_sum():
         "G": np.array([5.0, 5.0]),
     }
     out = ax.apply_advection_correction(main, np.zeros(2), np.zeros(2))
-    assert set(out.keys()) == {
+    expected_keys = {
         "Rn",
         "G",
         "H",
         "LE",
+        "HA_T",
         "H_adv",
+        "HA_Q",
+        "VAT",
         "V_adv",
         "H_plus_LE_orig",
         "H_plus_LE_corrected",
+        "available_energy",
+        "residual_orig",
+        "residual_corrected",
+        "included",
     }
+    assert set(out.keys()) == expected_keys
     np.testing.assert_allclose(out["H_plus_LE_orig"], [40.0, 60.0])
     np.testing.assert_allclose(out["H_plus_LE_corrected"], [40.0, 60.0])
     np.testing.assert_allclose(out["H_adv"], [0.0, 0.0])
     np.testing.assert_allclose(out["V_adv"], [0.0, 0.0])
-    # SUSPECT: "corrected" == "original" by construction — the function never
-    # folds H_adv/V_adv into the energy-balance sum, so it applies NO actual
-    # correction. Even with nonzero advection terms, H_plus_LE_corrected would
-    # be unchanged. The name over-promises relative to the behavior.
+    # available_energy = Rn - G; residual = Rn - G - H - LE (CLAUDE.md sign).
+    np.testing.assert_allclose(out["available_energy"], [55.0, 65.0])
+    np.testing.assert_allclose(out["residual_orig"], [15.0, 5.0])
+    np.testing.assert_allclose(out["residual_corrected"], [15.0, 5.0])
+    # Both steps pass Wang's gate (Rn > 75? no — Rn is 60/70 here), so with the
+    # default rn_min=75 neither step is "included"; the zero terms make the
+    # corrected sum identical either way.
+    np.testing.assert_array_equal(out["included"], [False, False])
 
 
 if __name__ == "__main__":
