@@ -6,9 +6,6 @@ Advection
 .. image:: https://img.shields.io/pypi/v/advection.svg
         :target: https://pypi.python.org/pypi/advection
 
-.. image:: https://img.shields.io/travis/inkenbrandt/advection.svg
-        :target: https://travis-ci.com/inkenbrandt/advection
-
 .. image:: https://readthedocs.org/projects/advection/badge/?version=latest
         :target: https://advection.readthedocs.io/en/latest/?version=latest
         :alt: Documentation Status
