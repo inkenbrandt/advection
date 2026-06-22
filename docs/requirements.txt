@@ -1,0 +1,6 @@
+# Documentation build requirements for Read the Docs / Sphinx.
+# The library itself is installed separately (see .readthedocs.yml).
+sphinx>=7.0
+sphinx-rtd-theme>=2.0
+sphinx-autodoc-typehints>=2.0
+myst-parser>=2.0
