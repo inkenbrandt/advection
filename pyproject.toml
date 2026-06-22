@@ -36,6 +36,8 @@ dev = ["pandas",
     "black",  # linting
     "pytest",  # testing
     "ruff",  # linting
+    "flake8",  # linting
+    "mypy",  # type checking
     "sphinx",  # documentation
     "sphinx-autodoc-typehints",  # documentation
     "sphinx-rtd-theme",  # documentation
@@ -54,6 +56,19 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
 "*" = ["*.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+# The codebase is currently untyped (docstrings carry the units/contract, not
+# annotations). mypy is run leniently so it passes today and grows teeth as
+# type hints are added; it is NOT configured to flag missing annotations.
+python_version = "3.10"
+files = ["src/advection"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
 
 
 

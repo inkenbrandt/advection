@@ -119,7 +119,8 @@ def bowen_ratio_closure(Rn, G, H, LE, S=0.0, *, warn_oasis=True, singular_tol=1e
     LE : float or array-like
         Measured latent heat flux [W/m^2]. Assumed **already WPL
         (Webb-Pearman-Leuning 1980) density-corrected** (a mandatory separate
-        pre-step, not a closure fix; see :func:`advection.advection.wpl_latent_heat_flux`).
+        pre-step, not a closure fix; see
+        :func:`advection.advection.wpl_latent_heat_flux`).
     S : float or array-like, optional
         Storage term [W/m^2] (air heat storage ``J`` etc.); default ``0``.
     warn_oasis : bool, optional

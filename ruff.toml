@@ -1,0 +1,13 @@
+# Ruff configuration for the `advection` package.
+# Format and lint target the standard 88-character line length (Black/Ruff
+# default). The default lint rule set (E4, E7, E9, F) is kept; project-specific
+# per-file relaxations live below.
+
+line-length = 88
+target-version = "py310"
+
+[lint.per-file-ignores]
+# The package re-exports its public API via star-imports, so F401 (imported but
+# unused) and F403 (unable to detect undefined names from `import *`) are
+# expected and intentional here.
+"src/advection/__init__.py" = ["F401", "F403"]
