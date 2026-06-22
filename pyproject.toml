@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "advection"
-version = "0.1.0"
+version = "0.2.0"
 description = "Functions used to calculate advective fluxes in eddy covariance data and make corrections"
 readme = "README.rst"
 authors = [

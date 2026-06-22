@@ -629,7 +629,7 @@ def compute_advection_fluxes(
     between the canopy/lower height ``h`` and the measurement height ``zm``.
 
     Vertical mean-advection term (replaces the old residual fallback)
-    ----------------------------------------------------------------
+    -----------------------------------------------------------------
     When the caller supplies the **planar-fit** mean vertical velocity
     ``w_bar`` (or a ``detect_vertical`` mask), the vertical heat advection is
     computed as the **measured** Lee (1998) / Wang et al. (2024) Eq. 6 term::
@@ -696,7 +696,7 @@ def compute_advection_fluxes(
     an advective flux.
 
     Required inputs (a missing one RAISES, never silently returns zero)
-    ------------------------------------------------------------------
+    -------------------------------------------------------------------
     Both ``main_data`` and each upwind tower must carry the fields the gradient
     terms need; ``tower_distance`` (or a per-tower ``'distance'``) is required.
     If any required field is missing a :class:`ValueError` is raised rather than
@@ -990,7 +990,7 @@ def apply_advection_correction(main_data, H_adv, V_adv, HA_Q=None, rn_min=75.0):
     Fold measured advective fluxes into the surface energy balance.
 
     Energy-balance bookkeeping (Moderow et al. 2021; Wang et al. 2024)
-    -----------------------------------------------------------------
+    ------------------------------------------------------------------
     The advection-augmented surface energy balance, written in the Moderow et al.
     (2021) **OUT-positive** convention (positive flux = energy *out* of the
     control volume), places the advective terms on the **turbulent-sum side**

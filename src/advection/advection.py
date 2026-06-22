@@ -367,10 +367,19 @@ def correct_sonic_heat_flux(w_Ts, T_mean, beta, Cp=1005.0, Lv=None, singular_tol
 
 
 def compute_sensible_heat_flux(w_T_prime, rho_air, Cp=1005.0):
-    """
+    r"""
     Compute the sensible heat flux H (W/m^2) from the kinematic heat flux w'T'.
 
-    Implements Eq. 5: H = rho * Cp * w'T'.
+    Implements the ``CLAUDE.md`` "Sensible heat" relation::
+
+        H = rho * Cp * w'T'                                   # W/m^2
+
+    Sign convention (Moderow et al. 2021, **OUT-positive**): a positive ``H`` is
+    energy carried *out* of the control volume (upward kinematic heat flux), a
+    negative ``H`` is energy *into* it (downward) -- the oasis fingerprint. The
+    sign is inherited directly from ``w'T'``; no extra negation is applied. Use
+    the WPL/humidity-corrected kinematic flux from
+    :func:`correct_sonic_heat_flux` as ``w_T_prime``.
 
     Parameters
     ----------
@@ -385,15 +394,28 @@ def compute_sensible_heat_flux(w_T_prime, rho_air, Cp=1005.0):
     -------
     float
         Sensible heat flux H [W/m^2].
+
+    References
+    ----------
+    Wang et al. (2024); Moderow et al. (2021), OUT-positive sign convention.
     """
     return rho_air * Cp * w_T_prime
 
 
 def latent_heat_flux_residual(Rnet, G, H):
-    """
+    r"""
     Compute latent heat flux (λE) as the residual of the energy balance.
 
-    Implements Eq. 6: λE = R_net - G - H.
+    Implements the **residual-closure** estimate (Twine et al. 2000)::
+
+        λE = R_net - G - H                                    # W/m^2
+
+    i.e. ``H`` is trusted and ``LE`` absorbs the closure gap, the storage-free
+    rearrangement of ``Rn - G = H + LE``. This is the *latent-heat-as-residual*
+    method (a legitimate standard closure choice), and is **distinct from** the
+    ``CLAUDE.md`` prohibition on computing an **advection** term as a residual.
+    See :func:`advection.closure.residual_le_closure` for the storage-aware form
+    and the closure caveats.
 
     .. note::
 
@@ -415,15 +437,27 @@ def latent_heat_flux_residual(Rnet, G, H):
     -------
     float
         Latent heat flux λE [W/m^2].
+
+    References
+    ----------
+    Twine, T. E., et al. (2000), Agric. For. Meteorol. 103, 279-300 (residual
+    closure).
     """
     return Rnet - G - H
 
 
 def latent_heat_flux_bowen(Rnet, G, beta, singular_tol=1e-6):
-    """
+    r"""
     Compute latent heat flux (λE) using the Bowen ratio method (no fast data needed).
 
-    Implements Eq. 7: λE = (R_net - G) / (1 + beta).
+    Implements the **Bowen-ratio partition** of the available energy
+    (Twine et al. 2000; Bowen 1926)::
+
+        λE = (R_net - G) / (1 + beta)                         # W/m^2
+
+    where ``beta = H / λE`` is the Bowen ratio. (This is *closure forcing*, not
+    advection accounting; see the caution below and
+    :func:`advection.closure.bowen_ratio_closure`.)
 
     .. note::
 
@@ -485,9 +519,9 @@ def latent_heat_flux_bowen(Rnet, G, beta, singular_tol=1e-6):
 
     References
     ----------
-    Wang et al. (2024), Eq. 7. Twine et al. (2000) -- on the breakdown of
-    Bowen-ratio closure when ``LE > (Rn - G)``. Moderow et al. (2021), sign
-    convention.
+    Twine, T. E., et al. (2000), Agric. For. Meteorol. 103, 279-300 -- on the
+    breakdown of Bowen-ratio closure when ``LE > (Rn - G)``. Wang et al. (2024).
+    Moderow et al. (2021), sign convention.
     """
     denom = 1 + beta
 

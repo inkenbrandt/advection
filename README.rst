@@ -48,6 +48,101 @@ closure, based on methods described by Wang et al. (2024).
     pressure term, coordinate rotation, and spectral corrections this helper
     omits.
 
+Physics & assumptions
+---------------------
+
+This library encodes a small, explicit physics contract (see ``CLAUDE.md``).
+Everything below is what the functions assume and obey.
+
+**Surface energy balance.** Without storage, ``Rn - G = H + LE``; with air heat
+storage ``J`` (Wang 2024 Eq. 11), ``Rn - G - J = H + LE``. The closure residual
+is ``Residual = Rn - G - H - LE`` and the evaporative fraction is
+``EF = LE / (Rn - G)``. ``EF > 1`` (equivalently ``LE > Rn - G``) is the
+**advective-input fingerprint** of the oasis regime.
+
+**Sign convention (Moderow et al. 2021 — OUT-positive).** A **positive** flux is
+energy **out** of the control volume; a **negative** flux is energy **into** it.
+In the oasis case (warm, dry air advected onto a cool, transpiring surface) this
+gives a downward (**negative**) ``H`` and **negative** horizontal/vertical heat
+advection — heat carried *into* the field.
+
+**Advection is computed from gradients, never from the residual.** Horizontal
+heat/moisture advection use the measured along-wind gradients (Wang 2024
+Eqs. 5a/5b; Moderow Term IV)::
+
+    HA_T = rho * Cp     * u_bar * (dT/dx) * (zm - h)     # W/m^2  (Eq. 5a)
+    HA_Q = rho * lambda * u_bar * (dq/dx) * (zm - h)     # W/m^2  (Eq. 5b)
+
+and vertical heat advection uses the **planar-fit** mean vertical velocity
+``w_bar`` (Lee 1998; Wang 2024 Eq. 6)::
+
+    VAT = rho * Cp * w_bar * (T_zm - <T>)               # W/m^2  (Eq. 6)
+
+The energy-balance residual ``(H + LE) - (Rn - G)`` is returned **only as a
+closure diagnostic** — it is never relabelled as an advective flux. If the
+inputs needed for a real advection term (an upwind tower, ``w_bar``, the
+column-mean ``<T>``) are missing, the functions **raise** rather than
+back-filling a meaningless zero or the residual.
+
+**Conditional-inclusion rule (Wang 2024).** Advective fluxes are folded into the
+budget **only** where **both** (1) ``Rn > 75 W/m^2`` **and** (2) the
+spectrally-corrected ``(H + LE) < (Rn - G)`` hold. Applying this gate raised
+closure from 0.89 to 0.97 in the Wang et al. (2024) alfalfa study. Steps that
+fail the gate are left exactly uncorrected.
+
+**Bowen-ratio closure is wrong in the oasis case.** When ``LE > (Rn - G)``,
+Bowen-ratio closure would shrink ``LE`` toward the available energy, which is
+physically wrong — the surplus is genuine advective input. The closure helpers
+in ``advection.closure`` warn in this regime; prefer adding the *measured*
+advective fluxes instead.
+
+**WPL pre-step.** Every open-path ``LE``/CO2 flux is assumed to be **already**
+WPL (Webb-Pearman-Leuning 1980) density-corrected — a mandatory, *separate*
+pre-processing step (see the note above). This library does **not** apply it.
+
+Worked oasis example
+~~~~~~~~~~~~~~~~~~~~~~
+
+Warm, dry air (30 °C, 5 g/kg) advects 100 m onto a cool, wet field
+(25 °C, 10 g/kg). The **signs** are the oasis fingerprint — heat advected *into*
+the field horizontally and vertically, and a *drying* moisture advection:
+
+.. code-block:: python
+
+    import numpy as np
+    from advection import compute_advection_fluxes, apply_advection_correction
+
+    main = {
+        "H": np.array([-30.0]),   # downward H -> oasis fingerprint
+        "LE": np.array([400.0]),
+        "Rn": np.array([300.0]), "G": np.array([20.0]),
+        "T": 25.0, "q": 0.010, "u": 2.0, "zm": 2.0, "h": 0.5,
+        "w_bar": -0.03, "T_col": 23.0,   # planar-fit subsidence; warm air aloft
+    }
+    upwind = {"T": 30.0, "q": 0.005}      # warm, dry upwind air
+
+    flux = compute_advection_fluxes(main, upwind_data=upwind, tower_distance=100.0)
+    print(flux["HA_T"], flux["HA_Q"], flux["VAT"])
+    # -> HA_T ~ -179 (heat INTO field), HA_Q ~ +431 (drying), VAT ~ -72 (warm air down)
+
+Note that *this* step has ``EF = 400/280 > 1``: the turbulent sum already
+*exceeds* the available energy, so there is no under-closure gap and the
+conditional-inclusion gate correctly **declines** to add advection here. The
+gate is built for the common *under-closure* case ``(H + LE) < (Rn - G)``. The
+following daytime step has such a gap (available 380, measured 150), and a net
+advective input of +120 W/m^2 moves the budget toward closure:
+
+.. code-block:: python
+
+    under = {"H": np.array([30.0]), "LE": np.array([120.0]),   # sum 150
+             "Rn": np.array([420.0]), "G": np.array([40.0])}   # available 380
+    corr = apply_advection_correction(
+        under, np.array([70.0]), np.array([40.0]), HA_Q=np.array([10.0]),
+    )
+    print(corr["included"])             # [ True ]  (Rn>75 AND H+LE<Rn-G)
+    print(corr["H_plus_LE_corrected"])  # [270.]    (150 + 120 folded in)
+    print(corr["residual_corrected"])   # [110.]    (was 230 -> closer to 0)
+
 Setup
 -----
 

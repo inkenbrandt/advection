@@ -98,6 +98,57 @@ Key references
 
 
 
+0.2.0 (2026-06-21)
+------------------
+
+Physics-correctness overhaul aligning the library with the ``CLAUDE.md`` contract
+(Wang et al. 2024; Moderow et al. 2021; Lee 1998; Twine et al. 2000; WPL 1980).
+Several changes are **behavior-breaking** relative to 0.1.0.
+
+* **Variance Bowen ratio is now signed (Wang 2024 Eq. 8).**
+  ``compute_bowen_ratio_variance`` returns ``sign(corr(T', q')) * |beta|`` when a
+  correlation, covariance, or fluctuation series is supplied — a **negative beta
+  is the oasis fingerprint**. With no sign source it returns the unsigned
+  magnitude and warns (backward compatible).
+* **Horizontal advection is gradient-based, not a flux difference**
+  (Wang 2024 Eqs. 5a/5b; Moderow Term IV). ``HA_T = rho*Cp*u*(dT/dx)*(zm-h)`` and
+  ``HA_Q = rho*lambda*u*(dq/dx)*(zm-h)`` are computed from an upwind reference; a
+  new ``HA_Q`` moisture-advection term is returned. **Breaking:**
+  ``compute_advection_fluxes`` now **raises** without an upwind tower /
+  ``tower_distance`` instead of silently returning ``H_adv = 0``.
+* **Vertical advection uses the planar-fit mean vertical velocity**
+  (Lee 1998; Wang 2024 Eq. 6): ``VAT = rho*Cp*w_bar*(T_zm - <T>)``. **Breaking:**
+  ``VAT``/``V_adv`` is now this *measured* term and is ``None`` when no vertical
+  inputs are given; if engaged without ``w_bar`` or the column-mean ``<T>`` the
+  function **raises** rather than back-filling the residual.
+* **Removed residual-as-advection behavior (hard rule).** The closure imbalance
+  ``(H + LE) - (Rn - G)`` is returned only as the diagnostic ``residual``
+  (``adv_in`` kept as a deprecated alias); it is never relabelled as an advective
+  flux.
+* **Real correction with a conditional-inclusion gate (Wang 2024).**
+  ``apply_advection_correction`` folds the measured advective terms onto the
+  turbulent side **only** where ``Rn > 75 W/m^2`` **and** ``(H + LE) < (Rn - G)``
+  — the gate that lifted closure from 0.89 to 0.97 in the alfalfa study. Gated-out
+  steps are left exactly uncorrected; ``NaN`` advective terms contribute 0.
+* **New ``advection.closure`` module.** Twine et al. (2000) Bowen-ratio and
+  residual-LE closure forcing plus EBR / residual / closure-slope diagnostics,
+  kept deliberately separate from advection accounting. Bowen-ratio closure
+  **warns when ``LE > (Rn - G)``** (the oasis case where forcing closure is
+  physically wrong).
+* **Singularity guards.** ``correct_sonic_heat_flux`` (small-negative-beta band)
+  and ``latent_heat_flux_bowen`` (``beta -> -1``) now return ``nan`` with a
+  warning instead of an unphysically large flux.
+* **Robustness & vectorization.** Detection (``detect_horizontal_advection``,
+  ``detect_vertical_advection``) is fully vectorized with documented, keyword
+  thresholds, a wind-sector fetch gate, and ``np.isnan`` masking of gaps (the old
+  ``is None`` test silently let ``NaN`` through).
+* **WPL pre-step.** Added the convenience helper ``wpl_latent_heat_flux`` and
+  documented throughout that open-path ``LE`` is assumed **already** WPL
+  density-corrected (a mandatory, separate pre-step this library does not apply).
+* **Docs.** Added a README "Physics & assumptions" section with a worked oasis
+  example, a closure API reference page, and corrected equation citations in the
+  ``latent_heat_flux_*`` / ``compute_sensible_heat_flux`` docstrings.
+
 0.1.0 (2025-04-23)
 ------------------
 
