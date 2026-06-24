@@ -35,7 +35,8 @@ def _to_kelvin(T):
 
 def compute_soil_heat_storage_flux(Csoil, dT_dt, dz=0.02):
     """
-    Compute soil heat storage flux Gs (W/m^2) from soil volumetric heat capacity and temperature change rate.
+    Compute soil heat storage flux Gs (W/m^2) from the soil volumetric heat
+    capacity and the temperature change rate.
 
     Implements Equation 1a: ``Gs = Cs * dz * (dTsoil/dt)``.
 
@@ -64,7 +65,8 @@ def compute_soil_heat_storage_flux(Csoil, dT_dt, dz=0.02):
 
 def total_ground_heat_flux(Gd, Gs):
     """
-    Compute the storage-corrected ground heat flux G by adding raw ground flux Gd and the storage term Gs.
+    Compute the storage-corrected ground heat flux G by adding the raw ground
+    flux Gd and the storage term Gs.
 
     Implements Equation 1b: G = Gd + Gs.
 
@@ -766,7 +768,8 @@ def latent_heat_vaporization(T):
 
 def specific_heat_moist_air(q):
     """
-    Calculate the specific heat capacity of moist air [J/(kg K)] given specific humidity.
+    Calculate the specific heat capacity of moist air [J/(kg K)] given the
+    specific humidity.
 
     Parameters
     ----------
